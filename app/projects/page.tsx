@@ -73,32 +73,69 @@ export default function ProjectsPage() {
   }, [user?.id, name]);
 
   useEffect(() => {
+    let cancelled = false;
+  
     (async () => {
-      // 1) Get session
-      const { data: { session }, error: sessionErr } = await supabase.auth.getSession();
+      // Safety: if anything hangs, stop loading after 8 seconds
+      const timeout = setTimeout(() => {
+        if (!cancelled) {
+          setPageError("Loading timed out. Check console for the last successful step.");
+          setLoading(false);
+        }
+      }, 8000);
   
-      if (sessionErr) {
-        console.error(sessionErr);
-        return;
+      try {
+        console.log("[Projects] start");
+  
+        const { data: { session }, error: sessionErr } = await supabase.auth.getSession();
+        console.log("[Projects] got session", !!session);
+  
+        if (sessionErr) throw sessionErr;
+  
+        if (!session) {
+          console.log("[Projects] no session, redirecting to login");
+          router.push("/login");
+          return; // OK to return without setLoading(false) because we’re navigating away
+        }
+  
+        // Bootstrap org (non-blocking: if it fails, we still load projects)
+        fetch("/api/orgs/bootstrap", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        }).then(() => console.log("[Projects] bootstrap ok"))
+          .catch((e) => console.warn("[Projects] bootstrap failed", e));
+  
+        // Now load projects (this MUST be awaited)
+        const { data: projects, error: projectsErr } = await supabase
+          .from("projects")
+          .select("*")
+          .order("created_at", { ascending: false });
+  
+        console.log("[Projects] projects loaded", projects?.length ?? 0);
+  
+        if (projectsErr) throw projectsErr;
+  
+        if (!cancelled) {
+          setProjects(projects ?? []);
+          setPageError(null);
+          setLoading(false);
+        }
+      } catch (e: any) {
+        console.error("[Projects] error", e);
+        if (!cancelled) {
+          setPageError(e?.message ?? "Unknown error while loading projects");
+          setLoading(false);
+        }
+      } finally {
+        clearTimeout(timeout);
       }
-  
-      if (!session) {
-        router.push("/login");
-        return;
-      }
-  
-      // 2) Bootstrap org for this user (safe to call repeatedly)
-      await fetch("/api/orgs/bootstrap", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-        },
-      });
-  
-      // 3) Continue your existing logic (load projects, etc...)
-      // ...
     })();
+  
+    return () => {
+      cancelled = true;
+    };
   }, [router]);
+  
   
 
   async function handleSignOut() {
@@ -221,20 +258,36 @@ export default function ProjectsPage() {
           </p>
         </div>
 
-        <button
-          onClick={handleSignOut}
-          style={{
-            padding: "10px 12px",
-            border: "1px solid #111",
-            background: "#fff",
-            borderRadius: 6,
-            cursor: "pointer",
-          }}
-        >
-          Sign out
-        </button>
-        <button onClick={() => router.push("/settings/brand")}>Brand Settings</button>
+        <div style={{ display: "flex", gap: 10 }}>
+  <button
+    onClick={() => router.push("/settings/brand")}
+    style={{
+      padding: "10px 12px",
+      border: "1px solid #111",
+      background: "#fff",
+      borderRadius: 6,
+      cursor: "pointer",
+    }}
+  >
+    Brand Settings
+  </button>
+
+  <button
+    onClick={handleSignOut}
+    style={{
+      padding: "10px 12px",
+      border: "1px solid #111",
+      background: "#fff",
+      borderRadius: 6,
+      cursor: "pointer",
+    }}
+  >
+    Sign out
+  </button>
+</div>
+
       </header>
+
 
 
       {pageError && (
