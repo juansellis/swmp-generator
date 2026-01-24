@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { zodToJsonSchema } from "zod-to-json-schema";
 
 
 export const SwmpWasteStreamRow = z.object({
@@ -78,4 +77,3 @@ export const SwmpSchema = z.object({
 
 export type Swmp = z.infer<typeof SwmpSchema>;
 
-export const SwmpJsonSchema = zodToJsonSchema(SwmpSchema as any, "swmp");
