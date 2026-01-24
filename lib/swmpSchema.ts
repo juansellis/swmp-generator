@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 
+
 export const SwmpWasteStreamRow = z.object({
   stream: z.string(),
   segregation_method: z.string(), // e.g. "Separate bin", "Bagged", "Residual"
