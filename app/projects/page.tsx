@@ -73,39 +73,33 @@ export default function ProjectsPage() {
   }, [user?.id, name]);
 
   useEffect(() => {
-    let mounted = true;
-
     (async () => {
-      setLoading(true);
-      setPageError(null);
-
-      const { data, error } = await supabase.auth.getSession();
-
-      if (!mounted) return;
-
-      if (error) {
-        setPageError(error.message);
-        setLoading(false);
+      // 1) Get session
+      const { data: { session }, error: sessionErr } = await supabase.auth.getSession();
+  
+      if (sessionErr) {
+        console.error(sessionErr);
         return;
       }
-
-      if (!data.session) {
-        router.replace("/login");
+  
+      if (!session) {
+        router.push("/login");
         return;
       }
-
-      setUser({
-        email: data.session.user.email ?? null,
-        id: data.session.user.id,
+  
+      // 2) Bootstrap org for this user (safe to call repeatedly)
+      await fetch("/api/orgs/bootstrap", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
       });
-
-      setLoading(false);
+  
+      // 3) Continue your existing logic (load projects, etc...)
+      // ...
     })();
-
-    return () => {
-      mounted = false;
-    };
   }, [router]);
+  
 
   async function handleSignOut() {
     setPageError(null);
@@ -239,7 +233,9 @@ export default function ProjectsPage() {
         >
           Sign out
         </button>
+        <button onClick={() => router.push("/settings/brand")}>Brand Settings</button>
       </header>
+
 
       {pageError && (
         <div

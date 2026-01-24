@@ -235,9 +235,32 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: "No parsed SWMP returned by model." }, { status: 500 });
       }
     }
+    let brand: any = null;
+
+if (project.org_id) {
+  const { data: org } = await supabaseAdmin
+    .from("orgs")
+    .select("name, logo_url, brand_primary, brand_secondary, footer_text, contact_email, contact_phone, website")
+    .eq("id", project.org_id)
+    .maybeSingle();
+
+  if (org) {
+    brand = {
+      org_name: org.name,
+      logo_url: org.logo_url,
+      brand_primary: org.brand_primary,
+      brand_secondary: org.brand_secondary,
+      footer_text: org.footer_text,
+      contact_email: org.contact_email,
+      contact_phone: org.contact_phone,
+      website: org.website,
+    };
+  }
+}
+
 
     // 5) Render HTML for viewing/export
-    const html = renderSwmpHtml(swmp);
+    const html = renderSwmpHtml(swmp, brand);
 
     // 6) Save SWMP record
     const { data: saved, error: saveErr } = await supabaseAdmin
