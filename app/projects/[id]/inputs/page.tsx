@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
+
 type ProjectRow = {
   id: string;
   user_id: string;
@@ -62,10 +63,12 @@ export default function ProjectInputsPage() {
   const params = useParams<{ id: string }>();
   const projectId = params?.id;
 
-  const [loading, setLoading] = useState(true);
-  const [pageError, setPageError] = useState<string | null>(null);
-
   const [project, setProject] = useState<ProjectRow | null>(null);
+  const [loading, setLoading] = useState(true);
+  
+  const [pageError, setPageError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  
 
   // Input state
   const [sortingLevel, setSortingLevel] =
@@ -96,7 +99,6 @@ export default function ProjectInputsPage() {
   const [notes, setNotes] = useState("");
 
   const [saveLoading, setSaveLoading] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
 
   const hazards = useMemo(() => {
@@ -126,7 +128,7 @@ export default function ProjectInputsPage() {
       if (!mounted) return;
   
       if (projectErr || !project) {
-        setError(projectErr?.message ?? "Project not found");
+        setPageError(projectErr?.message ?? "Project not found");
         setLoading(false);
         return;
       }
@@ -243,8 +245,8 @@ export default function ProjectInputsPage() {
 
       const { error } = await supabase.from("swmp_inputs").insert(payload);
 
-      if (pageError) {
-        setSaveError(error.message);
+      if (error) {
+        setSaveError(error.message || "Failed to save inputs.");
         return;
       }
 
