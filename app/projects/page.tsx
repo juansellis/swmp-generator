@@ -45,7 +45,7 @@ const PROJECT_TYPE_OPTIONS = [
 export default function ProjectsPage() {
   const router = useRouter();
 
-  const [user, setUser] = useState<UserView | null>(null);
+  const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [pageError, setPageError] = useState<string | null>(null);
 
@@ -97,6 +97,8 @@ export default function ProjectsPage() {
           router.push("/login");
           return; // OK to return without setLoading(false) because we’re navigating away
         }
+
+        setUser(session.user);
   
         // Bootstrap org (non-blocking: if it fails, we still load projects)
         fetch("/api/orgs/bootstrap", {
