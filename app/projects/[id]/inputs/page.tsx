@@ -779,7 +779,11 @@ setSoftwareName(savedInputs.monitoring?.software_name ?? "");
           </div>
         </FormSection>
 
-        <FormSection title="Report customisation" description="Customize branding and report appearance.">
+        <FormSection
+          title="Report customisation"
+          description="Customize branding and report appearance."
+          contentClassName="overflow-hidden"
+        >
           {saveProjectError ? (
             <Notice type="error" title="Error" message={saveProjectError} className="mb-4" />
           ) : null}
@@ -800,48 +804,50 @@ setSoftwareName(savedInputs.monitoring?.software_name ?? "");
               <Label>Client logo (optional)</Label>
 
               {clientLogoUrl ? (
-                <div className="border rounded-lg p-4 bg-card space-y-3">
-                  <div className="flex items-center gap-4">
-                    <div className="border rounded-md p-3 bg-background">
+                <div className="w-full rounded-lg border p-3 overflow-hidden">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="shrink-0 h-16 w-16 rounded-md border bg-white flex items-center justify-center overflow-hidden">
                       <img
                         src={clientLogoUrl}
                         alt="Client logo"
-                        className="h-16 w-auto max-w-[200px] object-contain"
+                        className="h-full w-full object-contain"
                       />
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">Current client logo</p>
-                      <p className="text-xs text-muted-foreground truncate">{clientLogoUrl}</p>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium">Current client logo</p>
+                      <p className="text-xs text-muted-foreground break-all">{clientLogoUrl}</p>
                     </div>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={async () => {
-                        if (!projectId) return;
-                        setUploadingClientLogo(true);
-                        try {
-                          const { error } = await supabase
-                            .from("projects")
-                            .update({ client_logo_url: null })
-                            .eq("id", projectId);
-                          if (error) {
-                            setSaveProjectError(error.message);
-                          } else {
-                            setClientLogoUrl("");
-                            setSaveProjectMsg("Client logo removed.");
+                    <div className="shrink-0">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={async () => {
+                          if (!projectId) return;
+                          setUploadingClientLogo(true);
+                          try {
+                            const { error } = await supabase
+                              .from("projects")
+                              .update({ client_logo_url: null })
+                              .eq("id", projectId);
+                            if (error) {
+                              setSaveProjectError(error.message);
+                            } else {
+                              setClientLogoUrl("");
+                              setSaveProjectMsg("Client logo removed.");
+                            }
+                          } catch (error: any) {
+                            setSaveProjectError(error?.message ?? "Failed to remove logo");
+                          } finally {
+                            setUploadingClientLogo(false);
                           }
-                        } catch (error: any) {
-                          setSaveProjectError(error?.message ?? "Failed to remove logo");
-                        } finally {
-                          setUploadingClientLogo(false);
-                        }
-                      }}
-                      disabled={uploadingClientLogo}
-                    >
-                      <XIcon className="size-4" />
-                      Remove
-                    </Button>
+                        }}
+                        disabled={uploadingClientLogo}
+                      >
+                        <XIcon className="size-4" />
+                        Remove
+                      </Button>
+                    </div>
                   </div>
                 </div>
               ) : (
