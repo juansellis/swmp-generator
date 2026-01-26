@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { ChevronDownIcon, ChevronUpIcon, XIcon } from "lucide-react";
+import { ChevronDownIcon, ChevronUpIcon, XIcon, UploadIcon } from "lucide-react";
 
 
 type ProjectRow = {
@@ -141,6 +141,10 @@ export default function ProjectInputsPage() {
   const [projectClientName, setProjectClientName] = useState(""); // optional
   const [saveProjectMsg, setSaveProjectMsg] = useState<string | null>(null);
   const [saveProjectError, setSaveProjectError] = useState<string | null>(null);
+
+  // Client logo upload state
+  const [uploadingClientLogo, setUploadingClientLogo] = useState(false);
+  const [clientLogoUploadProgress, setClientLogoUploadProgress] = useState(0);
 
   const [streamPlans, setStreamPlans] = useState<WasteStreamPlan[]>([]);
   const [streamPlanMsg, setStreamPlanMsg] = useState<string | null>(null);
@@ -449,6 +453,64 @@ setSoftwareName(savedInputs.monitoring?.software_name ?? "");
     }
   }
 
+  async function handleClientLogoUpload(file: File) {
+    if (!projectId) return;
+    setSaveProjectMsg(null);
+    setSaveProjectError(null);
+    setUploadingClientLogo(true);
+    setClientLogoUploadProgress(0);
+
+    try {
+      // Get file extension
+      const ext = file.name.split('.').pop()?.toLowerCase() || 'png';
+      // Store as: projects/<projectId>/client-logo.<ext>
+      const path = `${projectId}/client-logo.${ext}`;
+
+      // Simulate progress (Supabase doesn't provide upload progress in the current API)
+      const progressInterval = setInterval(() => {
+        setClientLogoUploadProgress((prev) => Math.min(prev + 10, 90));
+      }, 100);
+
+      const { error: uploadErr } = await supabase.storage
+        .from("brand-assets")
+        .upload(path, file, { upsert: true });
+
+      clearInterval(progressInterval);
+      setClientLogoUploadProgress(100);
+
+      if (uploadErr) {
+        setSaveProjectError(uploadErr.message);
+        setUploadingClientLogo(false);
+        setClientLogoUploadProgress(0);
+        return;
+      }
+
+      const { data } = supabase.storage.from("brand-assets").getPublicUrl(path);
+      const publicUrl = data.publicUrl;
+
+      // Save to project
+      const { error: updateErr } = await supabase
+        .from("projects")
+        .update({ client_logo_url: publicUrl })
+        .eq("id", projectId);
+
+      if (updateErr) {
+        setSaveProjectError(updateErr.message);
+        setUploadingClientLogo(false);
+        setClientLogoUploadProgress(0);
+        return;
+      }
+
+      setClientLogoUrl(publicUrl);
+      setSaveProjectMsg("Client logo uploaded successfully.");
+    } catch (error: any) {
+      setSaveProjectError(error?.message ?? "Failed to upload logo");
+    } finally {
+      setUploadingClientLogo(false);
+      setTimeout(() => setClientLogoUploadProgress(0), 500);
+    }
+  }
+
   async function handleGenerate() {
     setSaveError(null);
     setSaveMessage(null);
@@ -734,13 +796,113 @@ setSoftwareName(savedInputs.monitoring?.software_name ?? "");
               />
             </div>
 
-            <div className="grid gap-2">
-              <Label>Client logo URL (optional)</Label>
-              <Input
-                value={clientLogoUrl}
-                onChange={(e) => setClientLogoUrl(e.target.value)}
-                placeholder="https://..."
-              />
+            <div className="grid gap-3">
+              <Label>Client logo (optional)</Label>
+
+              {clientLogoUrl ? (
+                <div className="border rounded-lg p-4 bg-card space-y-3">
+                  <div className="flex items-center gap-4">
+                    <div className="border rounded-md p-3 bg-background">
+                      <img
+                        src={clientLogoUrl}
+                        alt="Client logo"
+                        className="h-16 w-auto max-w-[200px] object-contain"
+                      />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">Current client logo</p>
+                      <p className="text-xs text-muted-foreground truncate">{clientLogoUrl}</p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={async () => {
+                        if (!projectId) return;
+                        setUploadingClientLogo(true);
+                        try {
+                          const { error } = await supabase
+                            .from("projects")
+                            .update({ client_logo_url: null })
+                            .eq("id", projectId);
+                          if (error) {
+                            setSaveProjectError(error.message);
+                          } else {
+                            setClientLogoUrl("");
+                            setSaveProjectMsg("Client logo removed.");
+                          }
+                        } catch (error: any) {
+                          setSaveProjectError(error?.message ?? "Failed to remove logo");
+                        } finally {
+                          setUploadingClientLogo(false);
+                        }
+                      }}
+                      disabled={uploadingClientLogo}
+                    >
+                      <XIcon className="size-4" />
+                      Remove
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="border-2 border-dashed rounded-lg p-6 text-center bg-muted/30">
+                  <UploadIcon className="size-8 mx-auto mb-2 text-muted-foreground" />
+                  <p className="text-sm text-muted-foreground mb-3">No client logo uploaded yet</p>
+                </div>
+              )}
+
+              {uploadingClientLogo && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Uploading logo...</span>
+                    <span className="font-medium">{clientLogoUploadProgress}%</span>
+                  </div>
+                  <div className="h-2 w-full bg-muted rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-primary transition-all duration-300"
+                      style={{ width: `${clientLogoUploadProgress}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-center gap-2">
+                <Input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f && projectId) {
+                      handleClientLogoUpload(f);
+                    }
+                  }}
+                  disabled={uploadingClientLogo}
+                  className="flex-1"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    const input = document.createElement("input");
+                    input.type = "file";
+                    input.accept = "image/*";
+                    input.onchange = (e) => {
+                      const f = (e.target as HTMLInputElement).files?.[0];
+                      if (f && projectId) {
+                        handleClientLogoUpload(f);
+                      }
+                    };
+                    input.click();
+                  }}
+                  disabled={uploadingClientLogo}
+                >
+                  <UploadIcon className="size-4" />
+                  Choose File
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Supported formats: PNG, JPEG, SVG. Maximum file size recommended: 2MB.
+              </p>
             </div>
 
             <div className="grid gap-2">
@@ -893,14 +1055,19 @@ setSoftwareName(savedInputs.monitoring?.software_name ?? "");
               {selectedWasteStreams.length > 0 && (
                 <div className="flex flex-wrap gap-2 mb-4">
                   {selectedWasteStreams.map((s) => (
-                    <Badge key={s} variant="secondary" className="gap-2 pr-1">
-                      {s}
+                    <Badge
+                      key={s}
+                      variant="secondary"
+                      className="flex items-center gap-2 px-3 py-1.5 bg-muted border border-border rounded-full"
+                    >
+                      <span>{s}</span>
                       <button
                         type="button"
-                        onClick={() =>
-                          setSelectedWasteStreams((prev) => prev.filter((x) => x !== s))
-                        }
-                        className="ml-1 rounded-full hover:bg-secondary-foreground/20 p-0.5"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedWasteStreams((prev) => prev.filter((x) => x !== s));
+                        }}
+                        className="ml-1 rounded-full hover:bg-secondary-foreground/20 p-0.5 transition-colors"
                         aria-label={`Remove ${s}`}
                         title="Remove"
                       >
@@ -1431,19 +1598,20 @@ setSoftwareName(savedInputs.monitoring?.software_name ?? "");
               </div>
 
               <div className="space-y-2">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center justify-between rounded-lg border border-input p-3 bg-card">
+                  <Label className="font-normal">We use software to track waste</Label>
                   <Switch
                     checked={usesSoftware}
                     onCheckedChange={() => setUsesSoftware((v) => !v)}
                     disabled={saveLoading}
+                    className="data-[state=checked]:bg-primary data-[state=unchecked]:bg-muted border border-input data-[state=checked]:border-primary data-[state=unchecked]:border-border"
                   />
-                  <Label className="font-normal">We use software to track waste</Label>
                 </div>
                 {usesSoftware && (
                   <Input
                     value={softwareName}
                     onChange={(e) => setSoftwareName(e.target.value)}
-                    placeholder="Software name (e.g. WasteLog / Excel / BuilderTrend)"
+                    placeholder="Software name (e.g. WasteX / Excel )"
                     disabled={saveLoading}
                     className="mt-2"
                   />

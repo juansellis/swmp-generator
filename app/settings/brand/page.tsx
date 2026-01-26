@@ -207,8 +207,10 @@ export default function BrandSettingsPage() {
         <FormSection
           title="Organisation"
           description="Configure your organisation's branding, contact information, and logo."
+          className="overflow-hidden"
+          contentClassName="overflow-hidden"
         >
-          <div className="grid gap-6 w-full max-w-full">
+          <div className="grid gap-6 w-full">
             <div className="grid gap-2">
               <Label>Organisation name</Label>
               <Input value={name} onChange={(e) => setName(e.target.value)} className="w-full" />

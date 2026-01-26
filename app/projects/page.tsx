@@ -7,11 +7,19 @@ import { supabase } from "@/lib/supabaseClient";
 import { AppShell } from "@/components/app-shell";
 import { FormSection } from "@/components/form-section";
 import { PageHeader } from "@/components/page-header";
+import { Notice } from "@/components/notice";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -85,10 +93,27 @@ export default function ProjectsPage() {
   const [createLoading, setCreateLoading] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [createMessage, setCreateMessage] = useState<string | null>(null);
+  const [validationErrors, setValidationErrors] = useState<string[]>([]);
+
+  const requiredFields = useMemo(() => {
+    const errors: string[] = [];
+    if (!address.trim()) errors.push("Site address");
+    if (!region) errors.push("Region");
+    if (!projectType) errors.push("Project type");
+    if (!startDate) errors.push("Start date");
+    if (!clientName.trim()) errors.push("Client name");
+    if (!mainContractor.trim()) errors.push("Main contractor");
+    if (!swmpOwner.trim()) errors.push("SWMP owner");
+    return errors;
+  }, [address, region, projectType, startDate, clientName, mainContractor, swmpOwner]);
 
   const canCreate = useMemo(() => {
-    return !!user?.id && name.trim().length >= 2;
-  }, [user?.id, name]);
+    return (
+      !!user?.id &&
+      name.trim().length >= 2 &&
+      requiredFields.length === 0
+    );
+  }, [user?.id, name, requiredFields.length]);
 
   useEffect(() => {
     let cancelled = false;
@@ -113,7 +138,7 @@ export default function ProjectsPage() {
         if (!session) {
           console.log("[Projects] no session, redirecting to login");
           router.push("/login");
-          return; // OK to return without setLoading(false) because we’re navigating away
+          return; // OK to return without setLoading(false) because we're navigating away
         }
 
         setUser(session.user);
@@ -197,8 +222,16 @@ export default function ProjectsPage() {
     e.preventDefault();
     setCreateError(null);
     setCreateMessage(null);
+    setValidationErrors([]);
 
-    if (!canCreate) {
+    // Validate required fields
+    if (requiredFields.length > 0) {
+      setValidationErrors(requiredFields);
+      setCreateError(`Please fill in all required fields: ${requiredFields.join(", ")}`);
+      return;
+    }
+
+    if (!user?.id || name.trim().length < 2) {
       setCreateError("Please enter a project name (at least 2 characters).");
       return;
     }
@@ -209,14 +242,14 @@ export default function ProjectsPage() {
       const insertPayload = {
         user_id: user!.id,
         name: name.trim(),
-        address: address.trim() || null,
-        region: region || null,
-        project_type: projectType || null,
-        start_date: startDate || null,
-        end_date: endDate || null,
-        client_name: clientName || null,
-        main_contractor: mainContractor.trim() || null,
-        swmp_owner: swmpOwner.trim() || null,
+        address: address.trim(),
+        region: region,
+        project_type: projectType,
+        start_date: startDate,
+        end_date: endDate.trim() || null,
+        client_name: clientName.trim(),
+        main_contractor: mainContractor.trim(),
+        swmp_owner: swmpOwner.trim(),
       };
 
       const { data, error } = await supabase
@@ -315,7 +348,7 @@ export default function ProjectsPage() {
                   </div>
 
                   <div className="grid gap-2">
-                    <Label>Site address</Label>
+                    <Label>Site address *</Label>
                     <Input
                       value={address}
                       onChange={(e) => setAddress(e.target.value)}
@@ -327,43 +360,49 @@ export default function ProjectsPage() {
 
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="grid gap-2">
-                    <Label>Region</Label>
-                    <select
+                    <Label>Region *</Label>
+                    <Select
                       value={region}
-                      onChange={(e) => setRegion(e.target.value as any)}
+                      onValueChange={(value) => setRegion(value as any)}
                       disabled={createLoading}
-                      className="border-input bg-background text-foreground h-9 w-full rounded-md border px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] disabled:pointer-events-none disabled:opacity-50"
                     >
-                      <option value="">Select…</option>
-                      {REGION_OPTIONS.map((r) => (
-                        <option key={r} value={r}>
-                          {r}
-                        </option>
-                      ))}
-                    </select>
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Select…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {REGION_OPTIONS.map((r) => (
+                          <SelectItem key={r} value={r}>
+                            {r}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
 
                   <div className="grid gap-2">
-                    <Label>Project type</Label>
-                    <select
+                    <Label>Project type *</Label>
+                    <Select
                       value={projectType}
-                      onChange={(e) => setProjectType(e.target.value as any)}
+                      onValueChange={(value) => setProjectType(value as any)}
                       disabled={createLoading}
-                      className="border-input bg-background text-foreground h-9 w-full rounded-md border px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] disabled:pointer-events-none disabled:opacity-50"
                     >
-                      <option value="">Select…</option>
-                      {PROJECT_TYPE_OPTIONS.map((t) => (
-                        <option key={t} value={t}>
-                          {t}
-                        </option>
-                      ))}
-                    </select>
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Select…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {PROJECT_TYPE_OPTIONS.map((t) => (
+                          <SelectItem key={t} value={t}>
+                            {t}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
 
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="grid gap-2">
-                    <Label>Start date</Label>
+                    <Label>Start date *</Label>
                     <Input
                       type="date"
                       value={startDate}
@@ -384,7 +423,7 @@ export default function ProjectsPage() {
                 </div>
 
                 <div className="grid gap-2">
-                  <Label>Client name</Label>
+                  <Label>Client name *</Label>
                   <Input
                     value={clientName}
                     onChange={(e) => setClientName(e.target.value)}
@@ -395,7 +434,7 @@ export default function ProjectsPage() {
 
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="grid gap-2">
-                    <Label>Main contractor</Label>
+                    <Label>Main contractor *</Label>
                     <Input
                       value={mainContractor}
                       onChange={(e) => setMainContractor(e.target.value)}
@@ -405,7 +444,7 @@ export default function ProjectsPage() {
                   </div>
 
                   <div className="grid gap-2">
-                    <Label>SWMP owner</Label>
+                    <Label>SWMP owner *</Label>
                     <Input
                       value={swmpOwner}
                       onChange={(e) => setSwmpOwner(e.target.value)}
@@ -415,27 +454,41 @@ export default function ProjectsPage() {
                   </div>
                 </div>
 
+                {validationErrors.length > 0 ? (
+                  <Notice
+                    type="error"
+                    title="Missing required fields"
+                    message={`Please fill in: ${validationErrors.join(", ")}`}
+                  />
+                ) : null}
+
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <Button type="submit" disabled={createLoading || !canCreate}>
+                  <Button
+                    type="submit"
+                    variant="primary"
+                    disabled={createLoading || !canCreate}
+                  >
                     {createLoading ? "Creating…" : "Create project"}
                   </Button>
                   <div className="text-xs text-muted-foreground">
-                    Required: project name (min 2 chars)
+                    Required: project name, site address, region, project type, start date, client name, main contractor, SWMP owner
                   </div>
                 </div>
 
                 {createError ? (
-                  <Alert variant="destructive">
-                    <AlertTitle>Couldn’t create project</AlertTitle>
-                    <AlertDescription>{createError}</AlertDescription>
-                  </Alert>
+                  <Notice
+                    type="error"
+                    title="Couldn't create project"
+                    message={createError}
+                  />
                 ) : null}
 
                 {createMessage ? (
-                  <Alert>
-                    <AlertTitle>Success</AlertTitle>
-                    <AlertDescription>{createMessage}</AlertDescription>
-                  </Alert>
+                  <Notice
+                    type="success"
+                    title="Success"
+                    message={createMessage}
+                  />
                 ) : null}
               </form>
             </FormSection>
