@@ -4,6 +4,12 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
+import { AppShell } from "@/components/app-shell";
+import { PageHeader } from "@/components/page-header";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+
 type SwmpRow = {
   id: string;
   version: number;
@@ -66,91 +72,70 @@ export default function SwmpPage() {
 
   if (loading) {
     return (
-      <main style={{ maxWidth: 1100, margin: "48px auto", padding: 16 }}>
-        <p>Loading…</p>
-      </main>
+      <AppShell>
+        <div className="flex items-center justify-center py-24">
+          <p className="text-sm text-muted-foreground">Loading…</p>
+        </div>
+      </AppShell>
     );
   }
 
   if (error) {
     return (
-      <main style={{ maxWidth: 1100, margin: "48px auto", padding: 16 }}>
-        <button
-          onClick={() => router.push(`/projects/${projectId}/inputs`)}
-          style={{
-            padding: "8px 10px",
-            border: "1px solid #ccc",
-            background: "#fff",
-            borderRadius: 6,
-            cursor: "pointer",
-            marginBottom: 16,
-          }}
-        >
-          ← Back to inputs
-        </button>
-        <div
-          style={{
-            padding: 12,
-            border: "1px solid #f5c2c7",
-            background: "#f8d7da",
-            color: "#842029",
-            borderRadius: 6,
-          }}
-        >
-          {error}
+      <AppShell>
+        <div className="space-y-6">
+          <PageHeader
+            title="Generated SWMP"
+            actions={
+              <Button variant="outline" onClick={() => router.push(`/projects/${projectId}/inputs`)}>
+                ← Back to inputs
+              </Button>
+            }
+          />
+          <Alert variant="destructive">
+            <AlertTitle>Error</AlertTitle>
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
         </div>
-      </main>
+      </AppShell>
     );
   }
 
   return (
-    <main style={{ maxWidth: 1100, margin: "48px auto", padding: 16 }}>
-      <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
-        <button
-          onClick={() => router.push(`/projects/${projectId}/inputs`)}
-          style={{
-            padding: "8px 10px",
-            border: "1px solid #ccc",
-            background: "#fff",
-            borderRadius: 6,
-            cursor: "pointer",
-          }}
-        >
-          ← Back to inputs
-        </button>
-
-        <button
-          onClick={() => router.push("/projects")}
-          style={{
-            padding: "8px 10px",
-            border: "1px solid #ccc",
-            background: "#fff",
-            borderRadius: 6,
-            cursor: "pointer",
-          }}
-        >
-          Projects
-        </button>
-      </div>
-
-      <h1 style={{ margin: "0 0 6px" }}>Generated SWMP</h1>
-      <p style={{ marginTop: 0, color: "#444" }}>
-        Version {swmp?.version} • Generated {swmp ? new Date(swmp.created_at).toLocaleString() : ""}
-      </p>
-
-      <section
-        style={{
-          border: "1px solid #ddd",
-          borderRadius: 10,
-          overflow: "hidden",
-          background: "#fff",
-        }}
-      >
-        <div
-          style={{ padding: 16 }}
-          dangerouslySetInnerHTML={{ __html: swmp?.content_html ?? "<p>No HTML saved.</p>" }}
+    <AppShell>
+      <div className="space-y-6">
+        <PageHeader
+          title="Generated SWMP"
+          subtitle={
+            <span>
+              Version {swmp?.version} • Generated{" "}
+              {swmp ? new Date(swmp.created_at).toLocaleString() : ""}
+            </span>
+          }
+          actions={
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                onClick={() => router.push(`/projects/${projectId}/inputs`)}
+              >
+                ← Back to inputs
+              </Button>
+              <Button variant="outline" onClick={() => router.push("/projects")}>
+                Projects
+              </Button>
+            </div>
+          }
         />
-      </section>
-    </main>
+
+        <Card>
+          <CardContent className="p-6">
+            <div
+              className="prose prose-sm max-w-none"
+              dangerouslySetInnerHTML={{ __html: swmp?.content_html ?? "<p>No HTML saved.</p>" }}
+            />
+          </CardContent>
+        </Card>
+      </div>
+    </AppShell>
   );
 }

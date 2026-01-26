@@ -4,6 +4,23 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
+import { AppShell } from "@/components/app-shell";
+import { FormSection } from "@/components/form-section";
+import { PageHeader } from "@/components/page-header";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+
 type ProjectRow = {
   id: string;
   user_id: string;
@@ -61,6 +78,7 @@ export default function ProjectsPage() {
   >("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
+  const [clientName, setClientName] = useState("");
   const [mainContractor, setMainContractor] = useState("");
   const [swmpOwner, setSwmpOwner] = useState("");
 
@@ -196,6 +214,7 @@ export default function ProjectsPage() {
         project_type: projectType || null,
         start_date: startDate || null,
         end_date: endDate || null,
+        client_name: clientName || null,
         main_contractor: mainContractor.trim() || null,
         swmp_owner: swmpOwner.trim() || null,
       };
@@ -219,6 +238,7 @@ export default function ProjectsPage() {
       setProjectType("");
       setStartDate("");
       setEndDate("");
+      setClientName("");
       setMainContractor("");
       setSwmpOwner("");
 
@@ -236,310 +256,272 @@ export default function ProjectsPage() {
 
   if (loading) {
     return (
-      <main style={{ maxWidth: 1000, margin: "48px auto", padding: 16 }}>
-        <p>Loading…</p>
-      </main>
+      <AppShell>
+        <div className="flex items-center justify-center py-24">
+          <p className="text-sm text-muted-foreground">Loading…</p>
+        </div>
+      </AppShell>
     );
   }
 
   return (
-    <main style={{ maxWidth: 1000, margin: "48px auto", padding: 16 }}>
-      <header
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          gap: 12,
-          marginBottom: 24,
-        }}
-      >
-        <div>
-          <h1 style={{ fontSize: 28, margin: 0 }}>Projects</h1>
-          <p style={{ margin: "6px 0 0", color: "#444" }}>
-            Logged in as <strong>{user?.email ?? "Unknown"}</strong>
-          </p>
-        </div>
-
-        <div style={{ display: "flex", gap: 10 }}>
-  <button
-    onClick={() => router.push("/settings/brand")}
-    style={{
-      padding: "10px 12px",
-      border: "1px solid #111",
-      background: "#fff",
-      borderRadius: 6,
-      cursor: "pointer",
-    }}
-  >
-    Brand Settings
-  </button>
-
-  <button
-    onClick={handleSignOut}
-    style={{
-      padding: "10px 12px",
-      border: "1px solid #111",
-      background: "#fff",
-      borderRadius: 6,
-      cursor: "pointer",
-    }}
-  >
-    Sign out
-  </button>
-</div>
-
-      </header>
-
-
-
-      {pageError && (
-        <div
-          style={{
-            padding: 12,
-            border: "1px solid #f5c2c7",
-            background: "#f8d7da",
-            color: "#842029",
-            borderRadius: 6,
-            marginBottom: 16,
-          }}
-        >
-          {pageError}
-        </div>
-      )}
-
-      <section
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr",
-          gap: 16,
-          padding: 16,
-          border: "1px solid #ddd",
-          borderRadius: 10,
-          background: "#fafafa",
-          marginBottom: 18,
-        }}
-      >
-        <h2 style={{ margin: 0 }}>Create a new project</h2>
-
-        <form onSubmit={handleCreateProject} style={{ display: "grid", gap: 12 }}>
-          <div style={{ display: "grid", gap: 12, gridTemplateColumns: "1fr 1fr" }}>
-            <label style={{ display: "grid", gap: 6 }}>
-              <span>Project name *</span>
-              <input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="e.g., Hobson St Fit-out"
-                disabled={createLoading}
-                style={{ padding: 10, border: "1px solid #ccc", borderRadius: 6 }}
-              />
-            </label>
-
-            <label style={{ display: "grid", gap: 6 }}>
-              <span>Site address</span>
-              <input
-                value={address}
-                onChange={(e) => setAddress(e.target.value)}
-                placeholder="e.g., 26 Hobson Street, Auckland CBD"
-                disabled={createLoading}
-                style={{ padding: 10, border: "1px solid #ccc", borderRadius: 6 }}
-              />
-            </label>
-          </div>
-
-          <div style={{ display: "grid", gap: 12, gridTemplateColumns: "1fr 1fr" }}>
-            <label style={{ display: "grid", gap: 6 }}>
-              <span>Region</span>
-              <select
-                value={region}
-                onChange={(e) => setRegion(e.target.value as any)}
-                disabled={createLoading}
-                style={{ padding: 10, border: "1px solid #ccc", borderRadius: 6 }}
-              >
-                <option value="">Select…</option>
-                {REGION_OPTIONS.map((r) => (
-                  <option key={r} value={r}>
-                    {r}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label style={{ display: "grid", gap: 6 }}>
-              <span>Project type</span>
-              <select
-                value={projectType}
-                onChange={(e) => setProjectType(e.target.value as any)}
-                disabled={createLoading}
-                style={{ padding: 10, border: "1px solid #ccc", borderRadius: 6 }}
-              >
-                <option value="">Select…</option>
-                {PROJECT_TYPE_OPTIONS.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-
-          <div style={{ display: "grid", gap: 12, gridTemplateColumns: "1fr 1fr" }}>
-            <label style={{ display: "grid", gap: 6 }}>
-              <span>Start date</span>
-              <input
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                disabled={createLoading}
-                style={{ padding: 10, border: "1px solid #ccc", borderRadius: 6 }}
-              />
-            </label>
-
-            <label style={{ display: "grid", gap: 6 }}>
-              <span>End date</span>
-              <input
-                type="date"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-                disabled={createLoading}
-                style={{ padding: 10, border: "1px solid #ccc", borderRadius: 6 }}
-              />
-            </label>
-          </div>
-
-          <div style={{ display: "grid", gap: 12, gridTemplateColumns: "1fr 1fr" }}>
-            <label style={{ display: "grid", gap: 6 }}>
-              <span>Main contractor</span>
-              <input
-                value={mainContractor}
-                onChange={(e) => setMainContractor(e.target.value)}
-                placeholder="Company name"
-                disabled={createLoading}
-                style={{ padding: 10, border: "1px solid #ccc", borderRadius: 6 }}
-              />
-            </label>
-
-            <label style={{ display: "grid", gap: 6 }}>
-              <span>SWMP owner</span>
-              <input
-                value={swmpOwner}
-                onChange={(e) => setSwmpOwner(e.target.value)}
-                placeholder="Name / role"
-                disabled={createLoading}
-                style={{ padding: 10, border: "1px solid #ccc", borderRadius: 6 }}
-              />
-            </label>
-          </div>
-
-          <button
-            type="submit"
-            disabled={createLoading || !canCreate}
-            style={{
-              padding: "10px 12px",
-              border: "1px solid #111",
-              background: createLoading || !canCreate ? "#eee" : "#111",
-              color: createLoading || !canCreate ? "#666" : "white",
-              borderRadius: 6,
-              cursor: createLoading || !canCreate ? "not-allowed" : "pointer",
-              width: 220,
-            }}
-          >
-            {createLoading ? "Creating…" : "Create project"}
-          </button>
-
-          {createError && (
-            <div
-              style={{
-                padding: 12,
-                border: "1px solid #f5c2c7",
-                background: "#f8d7da",
-                color: "#842029",
-                borderRadius: 6,
-              }}
-            >
-              {createError}
+    <AppShell>
+      <div className="space-y-6">
+        <PageHeader
+          title="Projects"
+          subtitle={
+            <span>
+              Logged in as{" "}
+              <Badge variant="outline" className="ml-1">
+                {user?.email ?? "Unknown"}
+              </Badge>
+            </span>
+          }
+          actions={
+            <div className="flex items-center gap-2">
+              <Button variant="outline" onClick={() => router.push("/settings/brand")}>
+                Brand Settings
+              </Button>
+              <Button variant="outline" onClick={handleSignOut}>
+                Sign out
+              </Button>
             </div>
-          )}
+          }
+        />
 
-          {createMessage && (
-            <div
-              style={{
-                padding: 12,
-                border: "1px solid #badbcc",
-                background: "#d1e7dd",
-                color: "#0f5132",
-                borderRadius: 6,
-              }}
+        {pageError ? (
+          <Alert variant="destructive">
+            <AlertTitle>Error</AlertTitle>
+            <AlertDescription>{pageError}</AlertDescription>
+          </Alert>
+        ) : null}
+
+        <div className="grid gap-6 lg:grid-cols-5">
+          <div className="lg:col-span-2">
+            <FormSection
+              title="Create a new project"
+              description="Create a project, then go straight to inputs."
             >
-              {createMessage}
-            </div>
-          )}
-        </form>
-      </section>
+              <form onSubmit={handleCreateProject} className="grid gap-4">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="grid gap-2">
+                    <Label>Project name *</Label>
+                    <Input
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      placeholder="e.g., Hobson St Fit-out"
+                      disabled={createLoading}
+                    />
+                  </div>
 
-      <section
-        style={{
-          padding: 16,
-          border: "1px solid #ddd",
-          borderRadius: 10,
-          background: "#fff",
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "baseline",
-            marginBottom: 10,
-          }}
-        >
-          <h2 style={{ margin: 0 }}>Your projects</h2>
-          <button
-            onClick={fetchProjects}
-            disabled={listLoading}
-            style={{
-              padding: "8px 10px",
-              border: "1px solid #ccc",
-              background: "#fff",
-              borderRadius: 6,
-              cursor: "pointer",
-            }}
-          >
-            {listLoading ? "Refreshing…" : "Refresh"}
-          </button>
-        </div>
+                  <div className="grid gap-2">
+                    <Label>Site address</Label>
+                    <Input
+                      value={address}
+                      onChange={(e) => setAddress(e.target.value)}
+                      placeholder="e.g., 26 Hobson Street, Auckland CBD"
+                      disabled={createLoading}
+                    />
+                  </div>
+                </div>
 
-        {listLoading ? (
-          <p>Loading projects…</p>
-        ) : projects.length === 0 ? (
-          <p style={{ color: "#555" }}>No projects yet. Create your first one above.</p>
-        ) : (
-          <div style={{ display: "grid", gap: 10 }}>
-            {projects.map((p) => (
-              <button
-                key={p.id}
-                onClick={() => router.push(`/projects/${p.id}/inputs`)}
-                style={{
-                  textAlign: "left",
-                  padding: 12,
-                  border: "1px solid #ddd",
-                  borderRadius: 8,
-                  background: "#fafafa",
-                  cursor: "pointer",
-                }}
-              >
-                <div style={{ fontWeight: 700 }}>{p.name}</div>
-                <div style={{ color: "#555", marginTop: 4 }}>
-                  {(p.address ?? "No address")} • {(p.region ?? "Region not set")} •{" "}
-                  {(p.project_type ?? "Type not set")}
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="grid gap-2">
+                    <Label>Region</Label>
+                    <select
+                      value={region}
+                      onChange={(e) => setRegion(e.target.value as any)}
+                      disabled={createLoading}
+                      className="border-input bg-background text-foreground h-9 w-full rounded-md border px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] disabled:pointer-events-none disabled:opacity-50"
+                    >
+                      <option value="">Select…</option>
+                      {REGION_OPTIONS.map((r) => (
+                        <option key={r} value={r}>
+                          {r}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="grid gap-2">
+                    <Label>Project type</Label>
+                    <select
+                      value={projectType}
+                      onChange={(e) => setProjectType(e.target.value as any)}
+                      disabled={createLoading}
+                      className="border-input bg-background text-foreground h-9 w-full rounded-md border px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] disabled:pointer-events-none disabled:opacity-50"
+                    >
+                      <option value="">Select…</option>
+                      {PROJECT_TYPE_OPTIONS.map((t) => (
+                        <option key={t} value={t}>
+                          {t}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
-                <div style={{ color: "#666", marginTop: 4, fontSize: 13 }}>
-                  Created {new Date(p.created_at).toLocaleString()}
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="grid gap-2">
+                    <Label>Start date</Label>
+                    <Input
+                      type="date"
+                      value={startDate}
+                      onChange={(e) => setStartDate(e.target.value)}
+                      disabled={createLoading}
+                    />
+                  </div>
+
+                  <div className="grid gap-2">
+                    <Label>End date</Label>
+                    <Input
+                      type="date"
+                      value={endDate}
+                      onChange={(e) => setEndDate(e.target.value)}
+                      disabled={createLoading}
+                    />
+                  </div>
                 </div>
-              </button>
-            ))}
+
+                <div className="grid gap-2">
+                  <Label>Client name</Label>
+                  <Input
+                    value={clientName}
+                    onChange={(e) => setClientName(e.target.value)}
+                    placeholder="e.g. Auckland Council / Precinct Properties / Client Ltd"
+                    disabled={createLoading}
+                  />
+                </div>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="grid gap-2">
+                    <Label>Main contractor</Label>
+                    <Input
+                      value={mainContractor}
+                      onChange={(e) => setMainContractor(e.target.value)}
+                      placeholder="Company name"
+                      disabled={createLoading}
+                    />
+                  </div>
+
+                  <div className="grid gap-2">
+                    <Label>SWMP owner</Label>
+                    <Input
+                      value={swmpOwner}
+                      onChange={(e) => setSwmpOwner(e.target.value)}
+                      placeholder="Name / role"
+                      disabled={createLoading}
+                    />
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <Button type="submit" disabled={createLoading || !canCreate}>
+                    {createLoading ? "Creating…" : "Create project"}
+                  </Button>
+                  <div className="text-xs text-muted-foreground">
+                    Required: project name (min 2 chars)
+                  </div>
+                </div>
+
+                {createError ? (
+                  <Alert variant="destructive">
+                    <AlertTitle>Couldn’t create project</AlertTitle>
+                    <AlertDescription>{createError}</AlertDescription>
+                  </Alert>
+                ) : null}
+
+                {createMessage ? (
+                  <Alert>
+                    <AlertTitle>Success</AlertTitle>
+                    <AlertDescription>{createMessage}</AlertDescription>
+                  </Alert>
+                ) : null}
+              </form>
+            </FormSection>
           </div>
-        )}
-      </section>
-    </main>
+
+          <div className="lg:col-span-3">
+            <FormSection
+              title="Your projects"
+              actions={
+                <Button variant="outline" size="sm" onClick={fetchProjects} disabled={listLoading}>
+                  {listLoading ? "Refreshing…" : "Refresh"}
+                </Button>
+              }
+            >
+              {listLoading ? (
+                <div className="text-sm text-muted-foreground">Loading projects…</div>
+              ) : projects.length === 0 ? (
+                <Alert>
+                  <AlertTitle>No projects yet</AlertTitle>
+                  <AlertDescription>Create your first project using the form.</AlertDescription>
+                </Alert>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Project</TableHead>
+                      <TableHead>Address</TableHead>
+                      <TableHead>Region</TableHead>
+                      <TableHead>Type</TableHead>
+                      <TableHead>Created</TableHead>
+                      <TableHead className="text-right">Action</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {projects.map((p) => (
+                      <TableRow
+                        key={p.id}
+                        onClick={() => router.push(`/projects/${p.id}/inputs`)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            router.push(`/projects/${p.id}/inputs`);
+                          }
+                        }}
+                        tabIndex={0}
+                        className="cursor-pointer hover:bg-muted focus:bg-muted focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                        role="button"
+                        aria-label={`Open project ${p.name}`}
+                      >
+                        <TableCell className="font-medium">{p.name}</TableCell>
+                        <TableCell className="max-w-[260px] truncate">
+                          {p.address ?? "No address"}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="secondary">{p.region ?? "Not set"}</Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline">{p.project_type ?? "Not set"}</Badge>
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {new Date(p.created_at).toLocaleString()}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              router.push(`/projects/${p.id}/inputs`);
+                            }}
+                            onKeyDown={(e) => {
+                              e.stopPropagation();
+                            }}
+                          >
+                            Open
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </FormSection>
+          </div>
+        </div>
+      </div>
+    </AppShell>
   );
 }

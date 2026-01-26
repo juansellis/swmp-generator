@@ -54,6 +54,96 @@ export async function POST(req: Request) {
       );
     }
 
+    // Fetch org branding (if available) via org_members
+    let orgBrand: any = null;
+    if ((project as any).user_id) {
+      // Get org for the project's user via org_members
+      const { data: member } = await supabaseAdmin
+        .from("org_members")
+        .select("org_id")
+        .eq("user_id", (project as any).user_id)
+        .limit(1)
+        .maybeSingle();
+
+      if (member?.org_id) {
+        const { data: org } = await supabaseAdmin
+          .from("orgs")
+          .select(
+            "name, logo_url, brand_primary, brand_primary_colour, brand_secondary, footer_text, contact_email, contact_phone, website"
+          )
+          .eq("id", member.org_id)
+          .maybeSingle();
+
+        if (org) {
+          // Support both brand_primary and brand_primary_colour for backwards compatibility
+          orgBrand = {
+            ...org,
+            brand_primary: org.brand_primary_colour ?? org.brand_primary ?? null,
+          };
+        }
+      }
+    }
+
+    // Ensure we always have >= 4 streams to satisfy SwmpSchema.min(4)
+    // (users may select fewer streams in the UI)
+    const ensuredWasteStreams = (() => {
+      const selected = Array.isArray((inputs as any).waste_streams)
+        ? (inputs as any).waste_streams.map((x: any) => String(x)).filter(Boolean)
+        : [];
+
+      const unique = Array.from(new Set(selected));
+      const defaults = [
+        "Mixed C&D",
+        "Timber (untreated)",
+        "Metals",
+        "Cardboard",
+        "Plasterboard / GIB",
+        "Concrete / masonry",
+      ];
+
+      for (const d of defaults) {
+        if (unique.length >= 4) break;
+        if (!unique.includes(d)) unique.push(d);
+      }
+
+      // As a final fallback, pad with generic streams.
+      while (unique.length < 4) {
+        unique.push(`Other stream ${unique.length + 1}`);
+      }
+
+      return unique;
+    })();
+
+    // Normalize waste stream plans to the new schema shape (outcomes[])
+    const ensuredWasteStreamPlans = (() => {
+      const raw = Array.isArray((inputs as any).waste_stream_plans)
+        ? (inputs as any).waste_stream_plans
+        : [];
+
+      return raw.map((p: any) => {
+        const rawOutcomes = Array.isArray(p?.outcomes)
+          ? p.outcomes
+          : typeof p?.outcome === "string"
+            ? [p.outcome]
+            : ["Recycle"];
+
+        const mapOutcome = (x: any) => {
+          const s = String(x ?? "").trim();
+          if (s === "Dispose") return "Landfill";
+          if (s === "Recover") return "Recycle";
+          if (s === "Clean fill") return "Cleanfill";
+          return s;
+        };
+
+        const outcomes = rawOutcomes.map(mapOutcome);
+
+        return {
+          ...p,
+          outcomes,
+        };
+      });
+    })();
+
     // 3) Determine next version number
     const { data: existing, error: existingErr } = await supabaseAdmin
       .from("swmps")
@@ -68,32 +158,49 @@ export async function POST(req: Request) {
 
     const nextVersion = (existing?.[0]?.version ?? 0) + 1;
 
-    // Build common payload
-    const inputPayload = {
+    const reportTitle =
+      String((project as any).report_title ?? "").trim() ||
+      "Site Waste Management Plan (SWMP)";
+
+    const footerText =
+      String((project as any).report_footer_override ?? "").trim() ||
+      String(orgBrand?.footer_text ?? "").trim() ||
+      "";
+
+    // Build context payload for the model (and for mock)
+    const context = {
+      branding: {
+        org_name: orgBrand?.name ?? null,
+        org_logo_url: orgBrand?.logo_url ?? null,
+        brand_primary: orgBrand?.brand_primary ?? null,
+        brand_secondary: orgBrand?.brand_secondary ?? null,
+        client_name: (project as any).client_name ?? null,
+        client_logo_url: (project as any).client_logo_url ?? null,
+      },
       project: {
-        id: project.id,
-        name: project.name,
-        address: project.address ?? "",
+        project_name: project.name,
+        site_address: (project as any).site_address ?? project.address ?? "",
         region: project.region ?? "Other (NZ)",
         project_type: project.project_type ?? "Construction project",
-        start_date: project.start_date,
-        end_date: project.end_date,
-        main_contractor: project.main_contractor,
-        swmp_owner: project.swmp_owner,
+        start_date: project.start_date ?? null,
+        end_date: project.end_date ?? null,
+        main_contractor: project.main_contractor ?? "",
+        swmp_owner: project.swmp_owner ?? "",
       },
       inputs: {
-        sorting_level: inputs.sorting_level,
-        target_diversion: inputs.target_diversion,
-        constraints: inputs.constraints,
-        waste_streams: inputs.waste_streams,
-        hazards: inputs.hazards,
-        logistics: inputs.logistics,
-        notes: inputs.notes,
+        sorting_level: (inputs as any).sorting_level ?? null,
+        target_diversion: (inputs as any).target_diversion ?? null,
+        constraints: (inputs as any).constraints ?? [],
+        waste_streams: ensuredWasteStreams,
+        waste_stream_plans: ensuredWasteStreamPlans,
+        monitoring: (inputs as any).monitoring ?? null,
+        logistics: (inputs as any).logistics ?? null,
+        notes: (inputs as any).notes ?? null,
+        hazards: (inputs as any).hazards ?? null,
       },
-      required: {
-        include_bin_recommendation: true,
-        include_monitoring_checklist: true,
-        include_corrective_actions: true,
+      report: {
+        report_title: reportTitle,
+        footer_text: footerText,
       },
     };
 
@@ -101,110 +208,87 @@ export async function POST(req: Request) {
     let swmp: any;
 
     if (MOCK_SWMP) {
-      // Mock SWMP that conforms to SwmpSchema (must be valid Zod output)
       const today = new Date().toISOString().slice(0, 10);
 
       swmp = SwmpSchema.parse({
-        title: "Site Waste Management Plan (SWMP)",
-        prepared_for: project.main_contractor ?? "Main Contractor",
-        prepared_by: project.swmp_owner ?? "SWMP Owner",
+        report_title: reportTitle,
         date_prepared: today,
-        project_overview: {
-          project_name: project.name,
-          address: project.address ?? "",
-          region: project.region ?? "Other (NZ)",
-          project_type: project.project_type ?? "Construction project",
-          programme: `Start: ${project.start_date ?? "TBC"} | End: ${project.end_date ?? "TBC"}`,
-          site_constraints: inputs.constraints ?? [],
-        },
+        footer_text: footerText,
+        branding: context.branding,
+        project: context.project,
         objectives: {
-          diversion_target_percent: inputs.target_diversion ?? 70,
+          diversion_target_percent: Number((inputs as any).target_diversion ?? 70),
           primary_objectives: [
             "Maximise diversion of recoverable materials via on-site separation where practical.",
             "Minimise contamination through clear signage, storage controls, and trade engagement.",
-            "Maintain auditable records (dockets/weights) and report performance regularly.",
+            "Maintain auditable records (dockets/receipts/photos) and report performance regularly.",
           ],
         },
-        roles_and_responsibilities: [
+        responsibilities: [
           {
             role: "SWMP Owner",
-            name_or_party: project.swmp_owner ?? "SWMP Owner",
-            responsibilities: [
-              "Maintain SWMP",
-              "Coordinate waste streams and reporting",
-              "Drive continuous improvement",
-            ],
+            party: context.project.swmp_owner || "SWMP Owner",
+            responsibilities: ["Maintain SWMP", "Coordinate waste streams and reporting", "Drive improvements"],
           },
           {
-            role: "Site Manager",
-            name_or_party: project.main_contractor ?? "Main Contractor",
-            responsibilities: [
-              "Ensure bins are used correctly",
-              "Run inductions/toolbox talks",
-              "Manage contamination issues",
-            ],
+            role: "Main Contractor / Site Manager",
+            party: context.project.main_contractor || "Main Contractor",
+            responsibilities: ["Ensure segregation is followed", "Manage contamination", "Coordinate contractor"],
           },
           {
             role: "All trades",
-            name_or_party: "Subcontractors",
-            responsibilities: ["Follow segregation rules", "Keep areas tidy", "Report issues to Site Manager"],
+            party: "Subcontractors",
+            responsibilities: ["Follow segregation rules", "Keep areas tidy", "Report issues promptly"],
           },
         ],
-        waste_streams: (inputs.waste_streams ?? []).map((s: any) => ({
+        waste_streams: ensuredWasteStreams.map((s: any) => ({
           stream: String(s),
           segregation_method: "Separate where practical",
           container: "Skip / cage as allocated",
-          handling_notes: "Keep dry/clean, avoid contamination, flatten where possible.",
+          handling_notes: "Keep dry/clean, avoid contamination.",
           destination: "Approved recycler / transfer station",
         })),
-        onsite_separation_plan: {
-          bin_setup_recommendation: [
-            "Provide dedicated skips/cages for key streams (timber, metals, plasterboard, cardboard).",
-            "Locate bins close to workfaces where safe to reduce dumping into mixed bins.",
+        waste_stream_plans: ensuredWasteStreamPlans,
+        monitoring: {
+          methods: (context.inputs.monitoring?.methods ?? ["Dockets"]) as any,
+          uses_software: !!context.inputs.monitoring?.uses_software,
+          software_name: context.inputs.monitoring?.software_name ?? null,
+          dockets_description: context.inputs.monitoring?.dockets_description ?? footerText ?? null,
+        },
+        on_site_controls: {
+          bin_setup: [
+            "Provide dedicated skips/cages for key streams where feasible.",
+            "Locate bins close to workfaces where safe to reduce contamination.",
           ],
           signage_and_storage: [
-            "Simple signage with examples (what goes in/what stays out).",
-            "Covered storage for cardboard and plasterboard to keep materials dry.",
-            "Maintain clear separation zones and housekeeping.",
+            "Install clear signage with examples for each stream.",
+            "Keep cardboard/plasterboard dry (covered storage).",
           ],
           contamination_controls: [
-            "Daily spot checks by Site Manager.",
+            "Weekly inspections and contamination spot checks.",
             "Remove contaminants immediately and brief responsible trade.",
-            "Keep lids/covering to prevent weather damage.",
-            "No mixed hazardous materials into general skips.",
+            "Minimise mixed waste by improving bin placement/signage.",
           ],
-        },
-        regulated_and_hazardous: {
-          flags: inputs.hazards ?? { asbestos: false, lead_paint: false, contaminated_soil: false },
-          controls: [
+          hazardous_controls: [
             "Segregate regulated materials and use licensed contractors where required.",
-            "Keep disposal documentation (dockets, weighbridge tickets) on file.",
-            "Follow site-specific H&S controls and notifications where applicable.",
+            "Retain disposal documentation and approvals (e.g. cleanfill acceptance).",
           ],
         },
-        training_and_comms: {
-          induction_points: [
-            "Explain bin streams and contamination rules.",
-            "Show bin locations and signage.",
-            "Explain record-keeping expectations (photos/dockets).",
+        records_and_evidence: {
+          evidence_methods: Array.isArray(context.inputs.monitoring?.methods)
+            ? context.inputs.monitoring.methods
+            : ["Dockets"],
+          record_retention: [
+            "Weighbridge dockets / disposal receipts / invoices",
+            "Photos of bins and signage",
+            "Monthly summaries and corrective action notes",
           ],
-          toolbox_talk_topics: ["Contamination examples", "Keeping materials dry", "Recording dockets/weights"],
+          reporting_cadence: String((inputs as any).logistics?.reporting_cadence ?? "Monthly"),
+          notes: context.inputs.monitoring?.dockets_description ?? null,
         },
-        monitoring_and_reporting: {
-          reporting_cadence: inputs.logistics?.reporting_cadence ?? "Weekly",
-          checklists: [
-            { item: "Bins labelled and correctly located", frequency: "Weekly", owner: "Site Manager" },
-            { item: "Contamination checks completed", frequency: "Weekly", owner: "Site Manager" },
-            { item: "Dockets/weights filed", frequency: "Weekly", owner: "SWMP Owner" },
-          ],
-          corrective_actions: [
-            "Brief trade responsible for contamination and remove contaminants immediately",
-            "Adjust bin locations/signage if repeated errors occur",
-            "Escalate repeat non-compliance to Project Manager",
-          ],
-          evidence_to_keep: ["Weighbridge dockets", "Photos of bins/signage", "Weekly summary reports"],
-        },
-        assumptions: ["Final bin configuration and waste contractor details to be confirmed at site establishment."],
+        assumptions: [
+          "Final bin configuration and waste contractor details to be confirmed at site establishment.",
+        ],
       });
     } else {
       // Real OpenAI path (only runs when MOCK_SWMP=0)
@@ -217,13 +301,18 @@ export async function POST(req: Request) {
 
       const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-      const instructions =
-        "You are a New Zealand construction waste specialist. Produce a practical, NZ-first Site Waste Management Plan (SWMP) that is site-usable. Use NZ terminology (skip, transfer station, cleanfill, weighbridge dockets, toolbox talks). Avoid generic fluff. If details are missing, make reasonable assumptions and list them in assumptions. Output must follow the provided schema exactly.";
+      const instructions = `
+You are a New Zealand construction waste specialist. Produce a practical, NZ-first Site Waste Management Plan (SWMP) that is site-usable.
+
+Use NZ terminology (skip, transfer station, cleanfill, weighbridge dockets, toolbox talks).
+Avoid generic fluff. If details are missing, make reasonable assumptions and list them in assumptions.
+Output must follow the provided schema exactly.
+`;
 
       const response = await openai.responses.parse({
         model: "gpt-4o-mini",
         instructions,
-        input: JSON.stringify(inputPayload),
+        input: JSON.stringify(context),
         text: {
           format: zodTextFormat(SwmpSchema, "swmp"),
         },
@@ -235,32 +324,12 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: "No parsed SWMP returned by model." }, { status: 500 });
       }
     }
-    let brand: any = null;
 
-if (project.org_id) {
-  const { data: org } = await supabaseAdmin
-    .from("orgs")
-    .select("name, logo_url, brand_primary, brand_secondary, footer_text, contact_email, contact_phone, website")
-    .eq("id", project.org_id)
-    .maybeSingle();
+    // Validate against schema (defensive)
+    swmp = SwmpSchema.parse(swmp);
 
-  if (org) {
-    brand = {
-      org_name: org.name,
-      logo_url: org.logo_url,
-      brand_primary: org.brand_primary,
-      brand_secondary: org.brand_secondary,
-      footer_text: org.footer_text,
-      contact_email: org.contact_email,
-      contact_phone: org.contact_phone,
-      website: org.website,
-    };
-  }
-}
-
-
-    // 5) Render HTML for viewing/export
-    const html = renderSwmpHtml(swmp, brand);
+    // 5) Render HTML for viewing/export (deterministic renderer uses swmp.branding/footer_text)
+    const html = renderSwmpHtml(swmp);
 
     // 6) Save SWMP record
     const { data: saved, error: saveErr } = await supabaseAdmin

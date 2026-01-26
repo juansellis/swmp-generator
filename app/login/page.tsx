@@ -4,6 +4,15 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
 
+import { AppShell } from "@/components/app-shell";
+import { Logo } from "@/components/brand/logo";
+import { FormSection } from "@/components/form-section";
+import { PageHeader } from "@/components/page-header";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+
 export default function LoginPage() {
   const router = useRouter();
 
@@ -90,130 +99,108 @@ export default function LoginPage() {
   }
 
   return (
-    <main style={{ maxWidth: 520, margin: "48px auto", padding: 16 }}>
-      <h1 style={{ fontSize: 28, marginBottom: 8 }}>SWMP Generator</h1>
-      <p style={{ marginTop: 0, marginBottom: 24, color: "#444" }}>
-        Sign in to generate NZ-first Site Waste Management Plans.
-      </p>
+    <AppShell hideHeader>
+      <div className="space-y-6 max-w-md mx-auto">
+        <div className="flex justify-center mb-8">
+          <Logo height={96} className="h-24 w-auto sm:h-28 md:h-32" />
+        </div>
 
-      <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-        <button
-          type="button"
-          onClick={() => {
-            setMode("signin");
-            setError(null);
-            setMessage(null);
-          }}
-          disabled={loading}
-          style={{
-            padding: "10px 12px",
-            border: "1px solid #ccc",
-            background: mode === "signin" ? "#eee" : "#fff",
-            cursor: "pointer",
-          }}
-        >
-          Sign in
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            setMode("signup");
-            setError(null);
-            setMessage(null);
-          }}
-          disabled={loading}
-          style={{
-            padding: "10px 12px",
-            border: "1px solid #ccc",
-            background: mode === "signup" ? "#eee" : "#fff",
-            cursor: "pointer",
-          }}
-        >
-          Create account
-        </button>
-      </div>
+        <PageHeader
+          title="SWMP Generator"
+          subtitle="Sign in to generate NZ-first Site Waste Management Plans."
+        />
 
-      <form onSubmit={handleSubmit} style={{ display: "grid", gap: 12 }}>
-        <label style={{ display: "grid", gap: 6 }}>
-          <span>Email</span>
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="you@company.co.nz"
-            autoComplete="email"
-            disabled={loading}
-            style={{ padding: 10, border: "1px solid #ccc", borderRadius: 6 }}
-          />
-        </label>
-
-        <label style={{ display: "grid", gap: 6 }}>
-          <span>Password</span>
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="••••••••"
-            autoComplete={
-              mode === "signup" ? "new-password" : "current-password"
-            }
-            disabled={loading}
-            style={{ padding: 10, border: "1px solid #ccc", borderRadius: 6 }}
-          />
-        </label>
-
-        <button
-          type="submit"
-          disabled={loading}
-          style={{
-            padding: "10px 12px",
-            border: "1px solid #111",
-            background: "#111",
-            color: "white",
-            borderRadius: 6,
-            cursor: "pointer",
-          }}
-        >
-          {loading
-            ? "Please wait…"
-            : mode === "signup"
-            ? "Create account"
-            : "Sign in"}
-        </button>
-
-        {error && (
-          <div
-            style={{
-              padding: 12,
-              border: "1px solid #f5c2c7",
-              background: "#f8d7da",
-              color: "#842029",
-              borderRadius: 6,
+        <div className="flex gap-2">
+          <Button
+            type="button"
+            variant={mode === "signin" ? "default" : "outline"}
+            onClick={() => {
+              setMode("signin");
+              setError(null);
+              setMessage(null);
             }}
+            disabled={loading}
+            className="flex-1"
           >
-            {error}
-          </div>
-        )}
-
-        {message && (
-          <div
-            style={{
-              padding: 12,
-              border: "1px solid #badbcc",
-              background: "#d1e7dd",
-              color: "#0f5132",
-              borderRadius: 6,
+            Sign in
+          </Button>
+          <Button
+            type="button"
+            variant={mode === "signup" ? "default" : "outline"}
+            onClick={() => {
+              setMode("signup");
+              setError(null);
+              setMessage(null);
             }}
+            disabled={loading}
+            className="flex-1"
           >
-            {message}
-          </div>
-        )}
-      </form>
+            Create account
+          </Button>
+        </div>
 
-      <p style={{ marginTop: 18, color: "#666", fontSize: 13 }}>
+        <FormSection
+          title={mode === "signup" ? "Create account" : "Sign in"}
+          description={
+            mode === "signup"
+              ? "Create a new account to get started"
+              : "Enter your credentials to access your projects"
+          }
+        >
+          <form onSubmit={handleSubmit} className="grid gap-4">
+            <div className="grid gap-2">
+              <Label>Email</Label>
+              <Input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@company.co.nz"
+                autoComplete="email"
+                disabled={loading}
+              />
+            </div>
+
+            <div className="grid gap-2">
+              <Label>Password</Label>
+              <Input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                autoComplete={mode === "signup" ? "new-password" : "current-password"}
+                disabled={loading}
+              />
+            </div>
+
+            <Button type="submit" disabled={loading} className="w-full">
+              {loading
+                ? "Please wait…"
+                : mode === "signup"
+                ? "Create account"
+                : "Sign in"}
+            </Button>
+
+            {error ? (
+              <Alert variant="destructive">
+                <AlertTitle>Error</AlertTitle>
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            ) : null}
+
+            {message ? (
+              <Alert>
+                <AlertTitle>Success</AlertTitle>
+                <AlertDescription>{message}</AlertDescription>
+              </Alert>
+            ) : null}
+          </form>
+        </FormSection>
+
+        <p className="text-sm text-muted-foreground text-center">
         If you can’t sign in after creating an account, check whether Supabase
         email confirmation is enabled and confirm your email first.
       </p>
-    </main>
+      </div>
+    </AppShell>
   );
 }
