@@ -101,7 +101,7 @@ export default function LoginPage() {
   return (
     <AppShell hideHeader>
       <div className="space-y-6 max-w-md mx-auto">
-        <div className="flex justify-center mb-8">
+        <div className="flex justify-center py-4">
           <Logo height={96} className="h-24 w-auto sm:h-28 md:h-32" />
         </div>
 
@@ -114,42 +114,44 @@ export default function LoginPage() {
           <Button
             type="button"
             variant={mode === "signin" ? "default" : "outline"}
+            size="default"
             onClick={() => {
               setMode("signin");
               setError(null);
               setMessage(null);
             }}
             disabled={loading}
-            className="flex-1"
+            className="flex-1 transition-colors hover:opacity-90"
           >
             Sign in
           </Button>
           <Button
             type="button"
             variant={mode === "signup" ? "default" : "outline"}
+            size="default"
             onClick={() => {
               setMode("signup");
               setError(null);
               setMessage(null);
             }}
             disabled={loading}
-            className="flex-1"
+            className="flex-1 transition-colors hover:opacity-90"
           >
             Create account
           </Button>
         </div>
 
         <FormSection
-          title={mode === "signup" ? "Create account" : "Sign in"}
+          title={mode === "signup" ? "Create Account" : "Sign In"}
           description={
             mode === "signup"
-              ? "Create a new account to get started"
-              : "Enter your credentials to access your projects"
+              ? "Create a new account to get started."
+              : "Enter your credentials to access your projects."
           }
         >
           <form onSubmit={handleSubmit} className="grid gap-4">
             <div className="grid gap-2">
-              <Label>Email</Label>
+              <Label className="font-medium">Email</Label>
               <Input
                 type="email"
                 value={email}
@@ -157,11 +159,12 @@ export default function LoginPage() {
                 placeholder="you@company.co.nz"
                 autoComplete="email"
                 disabled={loading}
+                className="w-full"
               />
             </div>
 
             <div className="grid gap-2">
-              <Label>Password</Label>
+              <Label className="font-medium">Password</Label>
               <Input
                 type="password"
                 value={password}
@@ -169,10 +172,11 @@ export default function LoginPage() {
                 placeholder="••••••••"
                 autoComplete={mode === "signup" ? "new-password" : "current-password"}
                 disabled={loading}
+                className="w-full"
               />
             </div>
 
-            <Button type="submit" disabled={loading} className="w-full">
+            <Button type="submit" variant="default" size="default" disabled={loading} className="w-full transition-colors hover:opacity-90">
               {loading
                 ? "Please wait…"
                 : mode === "signup"

@@ -188,9 +188,9 @@ export default function BrandSettingsPage() {
       <div className="space-y-6">
         <PageHeader
           title="Brand Settings"
-          subtitle="Customize your organisation's branding and contact information."
+          subtitle="Customise your organisation's branding and contact information."
           actions={
-            <Button variant="outline" onClick={() => router.push("/projects")}>
+            <Button variant="outline" size="default" onClick={() => router.push("/projects")} className="transition-colors hover:bg-muted/80">
               ← Back
             </Button>
           }
@@ -206,7 +206,7 @@ export default function BrandSettingsPage() {
 
         <FormSection
           title="Organisation"
-          description="Configure your organisation's branding, contact information, and logo."
+          description="Configure your organisation's branding, contact information and logo."
           className="overflow-hidden"
           contentClassName="overflow-hidden"
         >
@@ -388,8 +388,8 @@ export default function BrandSettingsPage() {
             </div>
 
             <div className="border rounded-lg p-4 bg-card">
-              <Button variant="primary" onClick={handleSave} disabled={uploading} className="w-full">
-                Save settings
+              <Button variant="default" size="default" onClick={handleSave} disabled={uploading} className="w-full transition-colors hover:opacity-90">
+                Save Settings
               </Button>
             </div>
           </div>

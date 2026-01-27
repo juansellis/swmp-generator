@@ -24,8 +24,8 @@ export function FormSection({
     <Card className={cn("gap-0 py-0", className)}>
       <CardHeader className="border-b py-6">
         <div className="space-y-1">
-          <CardTitle className="text-base">{title}</CardTitle>
-          {description ? <CardDescription>{description}</CardDescription> : null}
+          <CardTitle className="text-lg font-semibold">{title}</CardTitle>
+          {description ? <CardDescription className="text-sm text-muted-foreground">{description}</CardDescription> : null}
         </div>
         {actions ? <CardAction>{actions}</CardAction> : null}
       </CardHeader>

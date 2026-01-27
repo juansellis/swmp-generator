@@ -16,10 +16,13 @@ import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { PROJECT_TYPE_GROUPS, PROJECT_TYPE_OPTIONS } from "@/lib/projectTypeOptions";
 import {
   Table,
   TableBody,
@@ -58,15 +61,6 @@ const REGION_OPTIONS = [
   "Other (NZ)",
 ] as const;
 
-const PROJECT_TYPE_OPTIONS = [
-  "Fit-out",
-  "New build",
-  "Residential",
-  "Commercial",
-  "Demolition",
-  "Civil",
-] as const;
-
 export default function ProjectsPage() {
   const router = useRouter();
 
@@ -81,9 +75,8 @@ export default function ProjectsPage() {
   const [name, setName] = useState("");
   const [address, setAddress] = useState("");
   const [region, setRegion] = useState<(typeof REGION_OPTIONS)[number] | "">("");
-  const [projectType, setProjectType] = useState<
-    (typeof PROJECT_TYPE_OPTIONS)[number] | ""
-  >("");
+  const [projectType, setProjectType] = useState("");
+  const [projectTypeOther, setProjectTypeOther] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [clientName, setClientName] = useState("");
@@ -96,16 +89,17 @@ export default function ProjectsPage() {
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
 
   const requiredFields = useMemo(() => {
+    const effective = projectType === "Other" ? projectTypeOther.trim() : projectType.trim();
     const errors: string[] = [];
     if (!address.trim()) errors.push("Site address");
     if (!region) errors.push("Region");
-    if (!projectType) errors.push("Project type");
+    if (!effective) errors.push("Project type");
     if (!startDate) errors.push("Start date");
     if (!clientName.trim()) errors.push("Client name");
     if (!mainContractor.trim()) errors.push("Main contractor");
     if (!swmpOwner.trim()) errors.push("SWMP owner");
     return errors;
-  }, [address, region, projectType, startDate, clientName, mainContractor, swmpOwner]);
+  }, [address, region, projectType, projectTypeOther, startDate, clientName, mainContractor, swmpOwner]);
 
   const canCreate = useMemo(() => {
     return (
@@ -239,12 +233,13 @@ export default function ProjectsPage() {
     setCreateLoading(true);
 
     try {
+      const ptSave = projectType === "Other" ? (projectTypeOther.trim() || "Other") : projectType;
       const insertPayload = {
         user_id: user!.id,
         name: name.trim(),
         address: address.trim(),
         region: region,
-        project_type: projectType,
+        project_type: ptSave,
         start_date: startDate,
         end_date: endDate.trim() || null,
         client_name: clientName.trim(),
@@ -269,6 +264,7 @@ export default function ProjectsPage() {
       setAddress("");
       setRegion("");
       setProjectType("");
+      setProjectTypeOther("");
       setStartDate("");
       setEndDate("");
       setClientName("");
@@ -312,10 +308,10 @@ export default function ProjectsPage() {
           }
           actions={
             <div className="flex items-center gap-2">
-              <Button variant="outline" onClick={() => router.push("/settings/brand")}>
+              <Button variant="outline" size="default" onClick={() => router.push("/settings/brand")} className="transition-colors hover:bg-muted/80">
                 Brand Settings
               </Button>
-              <Button variant="outline" onClick={handleSignOut}>
+              <Button variant="outline" size="default" onClick={handleSignOut} className="transition-colors hover:bg-muted/80">
                 Sign out
               </Button>
             </div>
@@ -332,7 +328,7 @@ export default function ProjectsPage() {
         <div className="grid gap-6 lg:grid-cols-5">
           <div className="lg:col-span-2">
             <FormSection
-              title="Create a new project"
+              title="Create a New Project"
               description="Create a project, then go straight to inputs."
             >
               <form onSubmit={handleCreateProject} className="grid gap-4">
@@ -382,21 +378,38 @@ export default function ProjectsPage() {
                   <div className="grid gap-2">
                     <Label>Project type *</Label>
                     <Select
-                      value={projectType}
-                      onValueChange={(value) => setProjectType(value as any)}
+                      value={PROJECT_TYPE_OPTIONS.includes(projectType) ? projectType : projectType ? "Other" : undefined}
+                      onValueChange={(value) => {
+                        setProjectType(value ?? "");
+                        if (value !== "Other") setProjectTypeOther("");
+                      }}
                       disabled={createLoading}
                     >
                       <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Select…" />
+                        <SelectValue placeholder="Select project type" />
                       </SelectTrigger>
                       <SelectContent>
-                        {PROJECT_TYPE_OPTIONS.map((t) => (
-                          <SelectItem key={t} value={t}>
-                            {t}
-                          </SelectItem>
+                        {PROJECT_TYPE_GROUPS.map((group) => (
+                          <SelectGroup key={group.label}>
+                            <SelectLabel className="font-semibold">{group.label}</SelectLabel>
+                            {group.options.map((opt) => (
+                              <SelectItem key={opt} value={opt}>
+                                {opt}
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
                         ))}
                       </SelectContent>
                     </Select>
+                    {projectType === "Other" && (
+                      <Input
+                        value={projectTypeOther}
+                        onChange={(e) => setProjectTypeOther(e.target.value)}
+                        placeholder="Describe project type"
+                        disabled={createLoading}
+                        className="mt-2"
+                      />
+                    )}
                   </div>
                 </div>
 
@@ -465,10 +478,12 @@ export default function ProjectsPage() {
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <Button
                     type="submit"
-                    variant="primary"
+                    variant="default"
+                    size="default"
                     disabled={createLoading || !canCreate}
+                    className="transition-colors hover:opacity-90"
                   >
-                    {createLoading ? "Creating…" : "Create project"}
+                    {createLoading ? "Creating…" : "Create Project"}
                   </Button>
                   <div className="text-xs text-muted-foreground">
                     Required: project name, site address, region, project type, start date, client name, main contractor, SWMP owner
@@ -496,9 +511,10 @@ export default function ProjectsPage() {
 
           <div className="lg:col-span-3">
             <FormSection
-              title="Your projects"
+              title="Your Projects"
+              description="Open a project to edit inputs and generate its SWMP."
               actions={
-                <Button variant="outline" size="sm" onClick={fetchProjects} disabled={listLoading}>
+                <Button variant="outline" size="default" onClick={fetchProjects} disabled={listLoading} className="transition-colors hover:bg-muted/80">
                   {listLoading ? "Refreshing…" : "Refresh"}
                 </Button>
               }

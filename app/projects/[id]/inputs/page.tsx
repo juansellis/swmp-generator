@@ -16,13 +16,28 @@ import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { ChevronDownIcon, ChevronUpIcon, XIcon, UploadIcon } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
+import { ChevronDownIcon, ChevronUpIcon, XIcon, UploadIcon, Loader2Icon } from "lucide-react";
 
 
 type ProjectRow = {
@@ -45,13 +60,11 @@ type ProjectRow = {
 
 const SORTING_LEVELS = ["Basic", "Moderate", "High"] as const;
 
-const DEFAULT_TARGETS: Record<string, number> = {
-  "Fit-out": 60,
-  "New build": 70,
-  Residential: 70,
-  Commercial: 70,
-  Demolition: 80,
-  Civil: 60,
+/** Sorting level → default target diversion. Only applied when target is 0 or user clicks "Apply template defaults". */
+const SORTING_LEVEL_TARGET: Record<(typeof SORTING_LEVELS)[number], number> = {
+  Basic: 40,
+  Moderate: 60,
+  High: 80,
 };
 
 const WASTE_STREAM_LIBRARY = [
@@ -72,6 +85,62 @@ const WASTE_STREAM_LIBRARY = [
   "Insulation",
   "Soil / spoil (cleanfill if verified)",
 ] as const;
+
+const WASTE_STREAM_SET = new Set<string>(WASTE_STREAM_LIBRARY);
+
+/** Project type → default waste streams. Only labels present in WASTE_STREAM_LIBRARY are used. */
+const PROJECT_TYPE_WASTE_STREAMS: Record<string, string[]> = {
+  "New build house": [
+    "Mixed C&D",
+    "Timber (untreated)",
+    "Timber (treated)",
+    "Metals",
+    "Cardboard",
+    "Hard plastics",
+    "Soft plastics (wrap/strapping)",
+    "Insulation",
+    "Plasterboard / GIB",
+    "Concrete / masonry",
+    "Carpet / carpet tiles",
+    "Paints/adhesives/chemicals",
+    "E-waste (cables/lighting/appliances)",
+    "Soil / spoil (cleanfill if verified)",
+  ].filter((s) => WASTE_STREAM_SET.has(s)),
+  "Civil works / earthworks": [
+    "Concrete / masonry",
+    "Soil / spoil (cleanfill if verified)",
+    "Soft plastics (wrap/strapping)",
+    "Metals",
+  ].filter((s) => WASTE_STREAM_SET.has(s)),
+  "Commercial fit-out": [
+    "Plasterboard / GIB",
+    "Timber (untreated)",
+    "Timber (treated)",
+    "Metals",
+    "Cardboard",
+    "Soft plastics (wrap/strapping)",
+    "Hard plastics",
+    "Carpet / carpet tiles",
+    "Paints/adhesives/chemicals",
+    "E-waste (cables/lighting/appliances)",
+    "Mixed C&D",
+  ].filter((s) => WASTE_STREAM_SET.has(s)),
+  "Demolition / strip-out (commercial)": [
+    "Concrete / masonry",
+    "Metals",
+    "Timber (untreated)",
+    "Timber (treated)",
+    "Plasterboard / GIB",
+    "Glass",
+    "Mixed C&D",
+  ].filter((s) => WASTE_STREAM_SET.has(s)),
+};
+
+function getWasteStreamsForProjectType(projectType: string): string[] {
+  const mapped = PROJECT_TYPE_WASTE_STREAMS[projectType];
+  if (mapped && mapped.length > 0) return [...mapped];
+  return ["Mixed C&D"];
+}
 
 type WasteStreamPlan = {
   category: string;
@@ -96,6 +165,22 @@ const MONITORING_METHOD_OPTIONS = [
   "Toolbox talks",
 ] as const;
 
+type ResponsibilityRow = { role: string; party: string; responsibilities: string[] };
+
+type AdditionalResponsibility = {
+  name: string;
+  role: string;
+  email?: string;
+  phone?: string;
+  responsibilities: string;
+};
+
+const DEFAULT_RESPONSIBILITIES: ResponsibilityRow[] = [
+  { role: "SWMP Owner", party: "SWMP Owner", responsibilities: ["Maintain SWMP", "Coordinate waste streams and reporting", "Drive improvements"] },
+  { role: "Main Contractor / Site Manager", party: "Main Contractor", responsibilities: ["Ensure segregation is followed", "Manage contamination", "Coordinate contractor"] },
+  { role: "All trades", party: "Subcontractors", responsibilities: ["Follow segregation rules", "Keep areas tidy", "Report issues promptly"] },
+];
+
 const COMMON_STREAM_SET = [
   "Mixed C&D",
   "Timber (untreated)",
@@ -114,6 +199,8 @@ const CONSTRAINTS = [
   "Shared waste area with other trades",
   "Noise/dust sensitive neighbours",
 ] as const;
+
+import { PROJECT_TYPE_GROUPS, PROJECT_TYPE_OPTIONS } from "@/lib/projectTypeOptions";
 
 export default function ProjectInputsPage() {
   const router = useRouter();
@@ -134,6 +221,7 @@ export default function ProjectInputsPage() {
   const [siteAddress, setSiteAddress] = useState("");
   const [region, setRegion] = useState("");
   const [projectType, setProjectType] = useState("");
+  const [projectTypeOther, setProjectTypeOther] = useState("");
   const [startDate, setStartDate] = useState(""); // YYYY-MM-DD
   const [clientName, setClientName] = useState("");
   const [mainContractor, setMainContractor] = useState("");
@@ -160,7 +248,6 @@ export default function ProjectInputsPage() {
 
   const [wasteStreamSearch, setWasteStreamSearch] = useState("");
   const [expandedStreamPlans, setExpandedStreamPlans] = useState<Record<string, boolean>>({});
-  const [moreOptionsOpen, setMoreOptionsOpen] = useState<Record<string, boolean>>({});
   const [copyFromStream, setCopyFromStream] = useState<string>("");
   const [wasteContractor, setWasteContractor] = useState("");
 
@@ -174,10 +261,11 @@ export default function ProjectInputsPage() {
   const [projectSaveMsg, setProjectSaveMsg] = useState<string | null>(null);
   const [projectSaveErr, setProjectSaveErr] = useState<string | null>(null);
 
+  const effectiveProjectType = projectType === "Other" ? projectTypeOther.trim() : projectType.trim();
   const requiredOk =
     siteAddress.trim().length > 0 &&
     region.trim().length > 0 &&
-    projectType.trim().length > 0 &&
+    effectiveProjectType.length > 0 &&
     startDate.trim().length > 0 &&
     clientName.trim().length > 0 &&
     mainContractor.trim().length > 0 &&
@@ -241,6 +329,13 @@ export default function ProjectInputsPage() {
     didInitDefaultStreamsRef.current = true;
   }, [loading, selectedWasteStreams.length]);
 
+  // When project type changes and no streams are selected, auto-apply project-type template.
+  useEffect(() => {
+    if (selectedWasteStreams.length > 0) return;
+    const next = getWasteStreamsForProjectType(effectiveProjectType);
+    if (next.length > 0) setSelectedWasteStreams(next);
+  }, [effectiveProjectType, selectedWasteStreams.length]);
+
   // Auto-populate partner from waste contractor unless user overrides per plan.
   useEffect(() => {
     const contractor = wasteContractor.trim() || null;
@@ -273,17 +368,6 @@ export default function ProjectInputsPage() {
     });
   }, [selectedWasteStreams]);
 
-  // Keep "more options" toggles aligned to current selection.
-  useEffect(() => {
-    setMoreOptionsOpen((prev) => {
-      const next: Record<string, boolean> = {};
-      for (const s of selectedWasteStreams) {
-        next[s] = prev[s] ?? false;
-      }
-      return next;
-    });
-  }, [selectedWasteStreams]);
-
   useEffect(() => {
     setCopyFromStream((prev) => {
       if (selectedWasteStreams.length === 0) return "";
@@ -305,8 +389,12 @@ export default function ProjectInputsPage() {
 
   const [notes, setNotes] = useState("");
 
+  const [responsibilities, setResponsibilities] = useState<ResponsibilityRow[]>(DEFAULT_RESPONSIBILITIES);
+  const [additionalResponsibilities, setAdditionalResponsibilities] = useState<AdditionalResponsibility[]>([]);
+
   const [saveLoading, setSaveLoading] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [isGenerating, setIsGenerating] = useState(false);
 
   const hazards = useMemo(() => {
     return {
@@ -347,7 +435,14 @@ export default function ProjectInputsPage() {
       setProjectClientName(project.client_name ?? "");
       setSiteAddress((project.site_address ?? project.address ?? "") as string);
       setRegion(project.region ?? "");
-      setProjectType(project.project_type ?? "");
+      const pt = project.project_type ?? "";
+      if (pt && !PROJECT_TYPE_OPTIONS.includes(pt)) {
+        setProjectType("Other");
+        setProjectTypeOther(pt);
+      } else {
+        setProjectType(pt);
+        setProjectTypeOther("");
+      }
       setStartDate(project.start_date ?? ""); // YYYY-MM-DD
       setClientName(project.client_name ?? "");
       setMainContractor(project.main_contractor ?? "");
@@ -368,8 +463,9 @@ export default function ProjectInputsPage() {
       if (savedInputsErr) console.warn(savedInputsErr);
   
       if (!savedInputsErr && savedInputs) {
-        // 🔁 Hydrate form state from DB
-        setSortingLevel(savedInputs.sorting_level ?? "Moderate");
+        // 🔁 Hydrate form state from DB (normalize "Medium" → "Moderate" for sorting level)
+        const rawLevel = savedInputs.sorting_level ?? "Moderate";
+        setSortingLevel((rawLevel === "Medium" ? "Moderate" : rawLevel) as (typeof SORTING_LEVELS)[number]);
         setTargetDiversion(savedInputs.target_diversion ?? 70);
         setSelectedConstraints(savedInputs.constraints ?? []);
         setSelectedWasteStreams(savedInputs.waste_streams ?? []);
@@ -382,8 +478,8 @@ export default function ProjectInputsPage() {
         setBinPreference(savedInputs.logistics?.bin_preference ?? "Recommend");
         setReportingCadence(savedInputs.logistics?.reporting_cadence ?? "Weekly");
         setMonitoringMethods(savedInputs.monitoring?.methods ?? ["Dockets"]);
-setUsesSoftware(!!savedInputs.monitoring?.uses_software);
-setSoftwareName(savedInputs.monitoring?.software_name ?? "");
+        setUsesSoftware(!!savedInputs.monitoring?.uses_software);
+        setSoftwareName(savedInputs.monitoring?.software_name ?? "");
         setDocketsDescription(savedInputs.monitoring?.dockets_description ?? DEFAULT_DOCKETS_DESCRIPTION);
 
   
@@ -433,6 +529,79 @@ setSoftwareName(savedInputs.monitoring?.software_name ?? "");
         setStreamPlans(migratedPlans);
 
         setNotes(savedInputs.notes ?? "");
+
+        const rawResp = (savedInputs as any).responsibilities;
+        const defaultRespWithParty = DEFAULT_RESPONSIBILITIES.map((d, i) => ({
+          ...d,
+          party: i === 0 ? (project?.swmp_owner ?? d.party) : i === 1 ? (project?.main_contractor ?? d.party) : d.party,
+        }));
+        if (Array.isArray(rawResp)) {
+          const main = rawResp.filter((r: any) => !r?.__additional);
+          const additionalFromResp = rawResp.filter((r: any) => r?.__additional).map((a: any) => ({
+            name: String(a?.name ?? "").trim(),
+            role: String(a?.role ?? "").trim(),
+            email: a?.email != null ? String(a.email).trim() : undefined,
+            phone: a?.phone != null ? String(a.phone).trim() : undefined,
+            responsibilities: String(a?.responsibilities ?? "").trim(),
+          }));
+          if (main.length >= 3) {
+            setResponsibilities(
+              main.slice(0, 3).map((r: any) => ({
+                role: String(r?.role ?? "").trim() || "Role",
+                party: String(r?.party ?? "").trim() || "—",
+                responsibilities: Array.isArray(r?.responsibilities)
+                  ? r.responsibilities.map((x: any) => String(x ?? "").trim()).filter(Boolean)
+                  : [],
+              }))
+            );
+          } else {
+            setResponsibilities(defaultRespWithParty);
+          }
+          const extra = additionalFromResp.filter((a) => a.name || a.role || a.responsibilities);
+          if (extra.length > 0) {
+            setAdditionalResponsibilities(extra);
+          } else {
+            const legacy = (savedInputs as any).additional_responsibilities;
+            if (Array.isArray(legacy)) {
+              setAdditionalResponsibilities(
+                legacy.map((a: any) => ({
+                  name: String(a?.name ?? "").trim(),
+                  role: String(a?.role ?? "").trim(),
+                  email: a?.email != null ? String(a.email).trim() : undefined,
+                  phone: a?.phone != null ? String(a.phone).trim() : undefined,
+                  responsibilities: String(a?.responsibilities ?? "").trim(),
+                })).filter((a) => a.name || a.role || a.responsibilities)
+              );
+            } else {
+              setAdditionalResponsibilities([]);
+            }
+          }
+        } else {
+          const rawAdditional = (savedInputs as any).additional_responsibilities;
+          if (Array.isArray(rawAdditional)) {
+            setAdditionalResponsibilities(
+              rawAdditional.map((a: any) => ({
+                name: String(a?.name ?? "").trim(),
+                role: String(a?.role ?? "").trim(),
+                email: a?.email != null ? String(a.email).trim() : undefined,
+                phone: a?.phone != null ? String(a.phone).trim() : undefined,
+                responsibilities: String(a?.responsibilities ?? "").trim(),
+              })).filter((a) => a.name || a.role || a.responsibilities)
+            );
+          } else {
+            setAdditionalResponsibilities([]);
+          }
+          setResponsibilities(defaultRespWithParty);
+        }
+      } else if (project) {
+        setSelectedWasteStreams(getWasteStreamsForProjectType(project.project_type ?? ""));
+        setAdditionalResponsibilities([]);
+        setResponsibilities(
+          DEFAULT_RESPONSIBILITIES.map((d, i) => ({
+            ...d,
+            party: i === 0 ? (project.swmp_owner ?? d.party) : i === 1 ? (project.main_contractor ?? d.party) : d.party,
+          }))
+        );
       }
   
       setLoading(false);
@@ -527,6 +696,7 @@ setSoftwareName(savedInputs.monitoring?.software_name ?? "");
       return;
     }
   
+    setIsGenerating(true);
     try {
       const res = await fetch("/api/generate-swmp", {
         method: "POST",
@@ -543,6 +713,8 @@ setSoftwareName(savedInputs.monitoring?.software_name ?? "");
       router.push(`/projects/${projectId}/swmp`);
     } catch (e: any) {
       setSaveError(e?.message ?? "Failed to generate SWMP");
+    } finally {
+      setIsGenerating(false);
     }
   }
 
@@ -575,11 +747,31 @@ setSoftwareName(savedInputs.monitoring?.software_name ?? "");
       const payload = {
         project_id: projectId,
         sorting_level: sortingLevel,
-        target_diversion: targetDiversion,
+        target_diversion: Math.min(100, Math.max(0, Math.round(Number(targetDiversion)) || 0)),
         constraints: selectedConstraints,
         waste_streams: selectedWasteStreams,
         hazards,
         waste_stream_plans: streamPlans,
+        responsibilities: [
+          ...responsibilities.map((r) => {
+            const list = r.responsibilities.filter(Boolean);
+            return {
+              role: r.role.trim() || "Role",
+              party: r.party.trim() || "—",
+              responsibilities: list.length ? list : ["—"],
+            };
+          }),
+          ...additionalResponsibilities
+            .filter((a) => a.name.trim() || a.role.trim() || a.responsibilities.trim())
+            .map((a) => ({
+              __additional: true as const,
+              name: a.name.trim(),
+              role: a.role.trim(),
+              email: a.email?.trim() || undefined,
+              phone: a.phone?.trim() || undefined,
+              responsibilities: a.responsibilities.trim(),
+            })),
+        ],
         logistics: {
           waste_contractor: wasteContractor.trim() || null,
           bin_preference: binPreference,
@@ -624,7 +816,7 @@ setSoftwareName(savedInputs.monitoring?.software_name ?? "");
           <PageHeader
             title="SWMP Inputs"
             actions={
-              <Button variant="outline" onClick={() => router.push("/projects")}>
+              <Button variant="outline" size="default" onClick={() => router.push("/projects")} className="transition-colors hover:bg-muted/80">
                 ← Back to projects
               </Button>
             }
@@ -647,14 +839,14 @@ setSoftwareName(savedInputs.monitoring?.software_name ?? "");
             </span>
           }
           actions={
-            <Button variant="outline" onClick={() => router.push("/projects")}>
+            <Button variant="outline" size="default" onClick={() => router.push("/projects")} className="transition-colors hover:bg-muted/80">
               ← Back to projects
             </Button>
           }
         />
 
         <FormSection
-          title="Project details (required)"
+          title="Project Details (Required)"
           description="Complete these fields to enable Save inputs and Generate SWMP."
         >
           {projectSaveErr ? (
@@ -689,11 +881,39 @@ setSoftwareName(savedInputs.monitoring?.software_name ?? "");
 
             <div className="grid gap-2">
               <Label>Project type *</Label>
-              <Input
-                value={projectType}
-                onChange={(e) => setProjectType(e.target.value)}
-                placeholder="e.g. Fit-out / Demolition / Construction"
-              />
+              <Select
+                value={PROJECT_TYPE_OPTIONS.includes(projectType) ? projectType : "Other"}
+                onValueChange={(v) => {
+                  setProjectType(v ?? "");
+                  if (v !== "Other") setProjectTypeOther("");
+                }}
+                disabled={saveLoading}
+              >
+                <SelectTrigger className="w-full bg-background">
+                  <SelectValue placeholder="Select project type" />
+                </SelectTrigger>
+                <SelectContent className="z-50 bg-popover text-popover-foreground border shadow-md max-h-[min(var(--radix-select-content-available-height),20rem)]">
+                  {PROJECT_TYPE_GROUPS.map((group) => (
+                    <SelectGroup key={group.label}>
+                      <SelectLabel className="font-semibold">{group.label}</SelectLabel>
+                      {group.options.map((opt) => (
+                        <SelectItem key={opt} value={opt}>
+                          {opt}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  ))}
+                </SelectContent>
+              </Select>
+              {projectType === "Other" && (
+                <Input
+                  value={projectTypeOther}
+                  onChange={(e) => setProjectTypeOther(e.target.value)}
+                  placeholder="Describe project type"
+                  disabled={saveLoading}
+                  className="mt-2"
+                />
+              )}
             </div>
 
             <div className="grid gap-2">
@@ -742,7 +962,8 @@ setSoftwareName(savedInputs.monitoring?.software_name ?? "");
                 const missing: string[] = [];
                 if (!siteAddress.trim()) missing.push("Site address");
                 if (!region.trim()) missing.push("Region");
-                if (!projectType.trim()) missing.push("Project type");
+                const ptSave = projectType === "Other" ? (projectTypeOther.trim() || "Other") : projectType.trim();
+                if (!ptSave) missing.push("Project type");
                 if (!startDate.trim()) missing.push("Start date");
                 if (!clientName.trim()) missing.push("Client name");
                 if (!mainContractor.trim()) missing.push("Main contractor");
@@ -759,7 +980,7 @@ setSoftwareName(savedInputs.monitoring?.software_name ?? "");
                     site_address: siteAddress.trim(),
                     address: siteAddress.trim(), // keep compatibility if both columns exist
                     region: region.trim(),
-                    project_type: projectType.trim(),
+                    project_type: ptSave,
                     start_date: startDate,
                     client_name: clientName.trim(),
                     main_contractor: mainContractor.trim(),
@@ -779,18 +1000,25 @@ setSoftwareName(savedInputs.monitoring?.software_name ?? "");
           </div>
         </FormSection>
 
-        <FormSection
-          title="Report customisation"
-          description="Customize branding and report appearance."
-          contentClassName="overflow-hidden"
-        >
-          {saveProjectError ? (
-            <Notice type="error" title="Error" message={saveProjectError} className="mb-4" />
-          ) : null}
-          {saveProjectMsg ? (
-            <Notice type="success" title="Success" message={saveProjectMsg} className="mb-4" />
-          ) : null}
-
+        <Accordion type="single" collapsible defaultValue="" className="rounded-xl border bg-card text-card-foreground shadow-sm overflow-hidden">
+          <AccordionItem value="report" className="border-b-0 px-0">
+            <AccordionTrigger className="w-full px-6 py-4 bg-muted/40 hover:bg-muted/60 transition-colors [&[data-state=open]]:bg-muted/60 rounded-t-xl data-[state=open]:rounded-b-none">
+              <span className="flex flex-col items-start text-left gap-0.5">
+                <span className="font-semibold text-lg">Report Customisation</span>
+                <span className="text-sm font-normal text-muted-foreground">
+                  Report: {[reportTitle.trim() && "title set", clientLogoUrl && "logo set"].filter(Boolean).join(" / ") || "not configured"}
+                </span>
+              </span>
+            </AccordionTrigger>
+            <AccordionContent>
+          <div className="px-6 pb-6">
+            {saveProjectError ? (
+              <Notice type="error" title="Error" message={saveProjectError} className="mb-4" />
+            ) : null}
+            {saveProjectMsg ? (
+              <Notice type="success" title="Success" message={saveProjectMsg} className="mb-4" />
+            ) : null}
+            <div className="rounded-lg border border-border p-4 bg-muted/40 space-y-4">
           <div className="grid gap-4">
             <div className="grid gap-2">
               <Label>Client name</Label>
@@ -929,10 +1157,12 @@ setSoftwareName(savedInputs.monitoring?.software_name ?? "");
               />
             </div>
 
-            <div className="mt-2 border rounded-lg p-4 bg-card">
+            <div className="mt-4 rounded-lg p-4 bg-muted/40 border border-border">
               <Button
                 type="button"
-                variant="primary"
+                variant="default"
+                size="default"
+                className="transition-colors hover:opacity-90"
                 onClick={async () => {
                   setSaveProjectMsg(null);
                   setSaveProjectError(null);
@@ -963,16 +1193,26 @@ setSoftwareName(savedInputs.monitoring?.software_name ?? "");
               </Button>
             </div>
           </div>
-        </FormSection>
+            </div>
+          </div>
+            </AccordionContent>
+          </AccordionItem>
+        </Accordion>
 
-        <FormSection title="Plan settings" description="Configure waste streams, constraints, and monitoring.">
+        <FormSection title="Plan Settings" description="Configure waste streams, constraints, and monitoring.">
           <form onSubmit={handleSaveInputs} className="grid gap-6">
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="grid gap-2">
                 <Label>Sorting level</Label>
                 <Select
                   value={sortingLevel}
-                  onValueChange={(v) => setSortingLevel(v as any)}
+                  onValueChange={(v) => {
+                    const level = v as (typeof SORTING_LEVELS)[number];
+                    setSortingLevel(level);
+                    if (targetDiversion === 0) {
+                      setTargetDiversion(SORTING_LEVEL_TARGET[level] ?? 60);
+                    }
+                  }}
                   disabled={saveLoading}
                 >
                   <SelectTrigger>
@@ -990,14 +1230,37 @@ setSoftwareName(savedInputs.monitoring?.software_name ?? "");
 
               <div className="grid gap-2">
                 <Label>Target diversion (%)</Label>
-                <Input
-                  type="number"
-                  min={0}
-                  max={100}
-                  value={targetDiversion}
-                  onChange={(e) => setTargetDiversion(Number(e.target.value))}
-                  disabled={saveLoading}
-                />
+                <div className="flex items-end gap-2">
+                  <Input
+                    type="number"
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={targetDiversion}
+                    onChange={(e) => {
+                      const raw = e.target.value;
+                      if (raw === "") {
+                        setTargetDiversion(0);
+                        return;
+                      }
+                      const n = Math.round(parseFloat(raw));
+                      if (Number.isNaN(n)) return;
+                      setTargetDiversion(Math.min(100, Math.max(0, n)));
+                    }}
+                    disabled={saveLoading}
+                    className="flex-1 min-w-0"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="default"
+                    disabled={saveLoading}
+                    onClick={() => setTargetDiversion(SORTING_LEVEL_TARGET[sortingLevel] ?? 60)}
+                    className="transition-colors hover:bg-muted/80"
+                  >
+                    Apply template defaults
+                  </Button>
+                </div>
               </div>
             </div>
 
@@ -1020,7 +1283,15 @@ setSoftwareName(savedInputs.monitoring?.software_name ?? "");
             </div>
 
             <div>
-              <Label className="mb-3 block font-semibold">Waste streams anticipated</Label>
+              <Label className="mb-3 block text-lg font-semibold">Waste Streams Anticipated</Label>
+
+              {selectedWasteStreams.length > 0 &&
+                effectiveProjectType &&
+                PROJECT_TYPE_WASTE_STREAMS[effectiveProjectType] != null && (
+                  <p className="text-sm text-muted-foreground mb-2">
+                    Template available — click Apply template to set default waste streams for this project type.
+                  </p>
+                )}
 
               <div className="flex flex-wrap gap-2 items-center mb-4">
                 <Input
@@ -1031,10 +1302,25 @@ setSoftwareName(savedInputs.monitoring?.software_name ?? "");
                   className="flex-1 min-w-[240px]"
                 />
 
+                {effectiveProjectType && PROJECT_TYPE_WASTE_STREAMS[effectiveProjectType] != null && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="default"
+                    disabled={saveLoading}
+                    onClick={() =>
+                      setSelectedWasteStreams(getWasteStreamsForProjectType(effectiveProjectType))
+                    }
+                    className="transition-colors hover:bg-muted/80"
+                  >
+                    Apply template
+                  </Button>
+                )}
+
                 <Button
                   type="button"
                   variant="outline"
-                  size="sm"
+                  size="default"
                   disabled={saveLoading}
                   onClick={() => {
                     setSelectedWasteStreams((prev) => {
@@ -1043,6 +1329,7 @@ setSoftwareName(savedInputs.monitoring?.software_name ?? "");
                       return Array.from(set);
                     });
                   }}
+                  className="transition-colors hover:bg-muted/80"
                 >
                   Add common set
                 </Button>
@@ -1050,9 +1337,10 @@ setSoftwareName(savedInputs.monitoring?.software_name ?? "");
                 <Button
                   type="button"
                   variant="outline"
-                  size="sm"
+                  size="default"
                   disabled={saveLoading}
                   onClick={() => setSelectedWasteStreams([])}
+                  className="transition-colors hover:bg-muted/80"
                 >
                   Clear
                 </Button>
@@ -1218,15 +1506,25 @@ setSoftwareName(savedInputs.monitoring?.software_name ?? "");
                         key={stream}
                         className="border rounded-lg bg-card p-3 space-y-3"
                       >
-                        <button
-                          type="button"
+                        <div
+                          role="button"
+                          tabIndex={0}
                           onClick={() =>
                             setExpandedStreamPlans((prev) => ({
                               ...prev,
                               [stream]: !(prev[stream] ?? false),
                             }))
                           }
-                          className="w-full text-left flex items-center justify-between gap-2"
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              setExpandedStreamPlans((prev) => ({
+                                ...prev,
+                                [stream]: !(prev[stream] ?? false),
+                              }));
+                            }
+                          }}
+                          className="w-full text-left flex items-center justify-between gap-2 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-md"
                         >
                           <div className="flex-1">
                             <div className="font-semibold">
@@ -1239,7 +1537,7 @@ setSoftwareName(savedInputs.monitoring?.software_name ?? "");
                               {expanded ? "Click to collapse" : "Click to expand"}
                             </div>
                           </div>
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 shrink-0">
                             {expanded ? (
                               <ChevronUpIcon className="size-4" />
                             ) : (
@@ -1259,7 +1557,7 @@ setSoftwareName(savedInputs.monitoring?.software_name ?? "");
                               Remove
                             </Button>
                           </div>
-                        </button>
+                        </div>
 
                         {expanded && (
                           <div className="space-y-4 pt-3 border-t">
@@ -1391,7 +1689,7 @@ setSoftwareName(savedInputs.monitoring?.software_name ?? "");
                             </div>
 
                             <div className="grid gap-2">
-                              <Label>Planned pathway</Label>
+                              <Label>Planned pathway / planned actions</Label>
                               <Textarea
                                 value={safePlan.pathway}
                                 onChange={(e) => {
@@ -1403,95 +1701,77 @@ setSoftwareName(savedInputs.monitoring?.software_name ?? "");
                                   );
                                 }}
                                 rows={2}
+                                placeholder="e.g. Segregate where practical and send to approved recycler."
                                 disabled={saveLoading}
                               />
                             </div>
 
-                            <div>
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                onClick={() =>
-                                  setMoreOptionsOpen((prev) => ({
-                                    ...prev,
-                                    [stream]: !(prev[stream] ?? false),
-                                  }))
-                                }
-                              >
-                                {moreOptionsOpen[stream] ? "Hide more options" : "More options"}
-                              </Button>
+                            <div className="grid gap-4 sm:grid-cols-2">
+                              <div className="grid gap-2">
+                                <Label>Estimated quantity (optional)</Label>
+                                <Input
+                                  type="number"
+                                  value={safePlan.estimated_qty ?? ""}
+                                  onChange={(e) => {
+                                    const v = e.target.value;
+                                    setStreamPlans((prev) =>
+                                      prev.map((p) =>
+                                        p.category === stream
+                                          ? { ...p, estimated_qty: v === "" ? null : Number(v) }
+                                          : p
+                                      )
+                                    );
+                                  }}
+                                  disabled={saveLoading}
+                                />
+                              </div>
+                              <div className="grid gap-2">
+                                <Label>Unit (optional)</Label>
+                                <Select
+                                  value={safePlan.unit ?? undefined}
+                                  onValueChange={(v) => {
+                                    setStreamPlans((prev) =>
+                                      prev.map((p) =>
+                                        p.category === stream
+                                          ? { ...p, unit: (v === "none" ? null : (v || null)) as any }
+                                          : p
+                                      )
+                                    );
+                                  }}
+                                  disabled={saveLoading}
+                                >
+                                  <SelectTrigger className="w-full bg-background">
+                                    <SelectValue placeholder="—" />
+                                  </SelectTrigger>
+                                  <SelectContent className="z-50 bg-popover border border-border">
+                                    <SelectItem value="none">—</SelectItem>
+                                    <SelectItem value="kg">kg</SelectItem>
+                                    <SelectItem value="t">t</SelectItem>
+                                    <SelectItem value="m3">m3</SelectItem>
+                                    <SelectItem value="skip">skip</SelectItem>
+                                    <SelectItem value="load">load</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
                             </div>
 
-                            {moreOptionsOpen[stream] && (
-                              <div className="space-y-4 pt-3 border-t">
-                                <div className="grid gap-4 sm:grid-cols-2">
-                                  <div className="grid gap-2">
-                                    <Label>Estimated quantity (optional)</Label>
-                                    <Input
-                                      type="number"
-                                      value={safePlan.estimated_qty ?? ""}
-                                      onChange={(e) => {
-                                        const v = e.target.value;
-                                        setStreamPlans((prev) =>
-                                          prev.map((p) =>
-                                            p.category === stream
-                                              ? { ...p, estimated_qty: v === "" ? null : Number(v) }
-                                              : p
-                                          )
-                                        );
-                                      }}
-                                      disabled={saveLoading}
-                                    />
-                                  </div>
-
-                                  <div className="grid gap-2">
-                                    <Label>Unit (optional)</Label>
-                                    <Select
-                                      value={safePlan.unit ?? ""}
-                                      onValueChange={(v) => {
-                                        setStreamPlans((prev) =>
-                                          prev.map((p) =>
-                                            p.category === stream
-                                              ? { ...p, unit: (v || null) as any }
-                                              : p
-                                          )
-                                        );
-                                      }}
-                                      disabled={saveLoading}
-                                    >
-                                      <SelectTrigger>
-                                        <SelectValue placeholder="—" />
-                                      </SelectTrigger>
-                                      <SelectContent>
-                                        <SelectItem value="">—</SelectItem>
-                                        <SelectItem value="kg">kg</SelectItem>
-                                        <SelectItem value="t">t</SelectItem>
-                                        <SelectItem value="m3">m3</SelectItem>
-                                        <SelectItem value="skip">skip</SelectItem>
-                                        <SelectItem value="load">load</SelectItem>
-                                      </SelectContent>
-                                    </Select>
-                                  </div>
-                                </div>
-
-                                <div className="grid gap-2">
-                                  <Label>Notes (optional)</Label>
-                                  <Input
-                                    value={safePlan.notes ?? ""}
-                                    onChange={(e) => {
-                                      const v = e.target.value;
-                                      setStreamPlans((prev) =>
-                                        prev.map((p) =>
-                                          p.category === stream ? { ...p, notes: v || null } : p
-                                        )
-                                      );
-                                    }}
-                                    disabled={saveLoading}
-                                  />
-                                </div>
-                              </div>
-                            )}
+                            <div className="grid gap-2">
+                              <Label>Notes / methodology (optional)</Label>
+                              <Textarea
+                                value={safePlan.notes ?? ""}
+                                onChange={(e) => {
+                                  const v = e.target.value;
+                                  setStreamPlans((prev) =>
+                                    prev.map((p) =>
+                                      p.category === stream ? { ...p, notes: v || null } : p
+                                    )
+                                  );
+                                }}
+                                rows={2}
+                                placeholder="Extra notes or methodology for this stream."
+                                disabled={saveLoading}
+                              />
+                            </div>
                           </div>
                         )}
                       </div>
@@ -1564,9 +1844,21 @@ setSoftwareName(savedInputs.monitoring?.software_name ?? "");
               </div>
             </div>
 
-            <div className="grid gap-2 max-w-sm">
-              <Label>Monitoring & reporting cadence</Label>
-              <Select
+            <Accordion type="single" collapsible defaultValue="" className="w-full">
+              <AccordionItem value="monitoring" className="border rounded-lg px-0 mb-2 overflow-hidden">
+                <AccordionTrigger className="w-full px-4 py-4 bg-muted/40 hover:bg-muted/60 transition-colors [&[data-state=open]]:bg-muted/60 rounded-t-lg data-[state=open]:rounded-b-none">
+                  <span className="flex flex-col items-start text-left gap-0.5">
+                    <span className="font-semibold text-lg">Monitoring & Reporting</span>
+                    <span className="text-sm font-normal text-muted-foreground">
+                      {monitoringMethods.length ? `${monitoringMethods.join(", ")}` : "Not configured"}
+                    </span>
+                  </span>
+                </AccordionTrigger>
+                <AccordionContent className="px-4 pb-4">
+            <div className="space-y-4">
+              <div className="grid gap-2 max-w-sm">
+                <Label>Monitoring & reporting cadence</Label>
+                <Select
                 value={reportingCadence}
                 onValueChange={(v) => setReportingCadence(v as any)}
                 disabled={saveLoading}
@@ -1580,10 +1872,10 @@ setSoftwareName(savedInputs.monitoring?.software_name ?? "");
                   <SelectItem value="Monthly">Monthly</SelectItem>
                 </SelectContent>
               </Select>
-            </div>
+              </div>
 
-            <div className="border rounded-lg bg-card p-4 space-y-4">
-              <Label className="font-semibold">Monitoring evidence</Label>
+              <div className="border rounded-lg bg-card p-4 space-y-4">
+                <Label className="font-semibold">Monitoring evidence</Label>
               <p className="text-sm text-muted-foreground">
               Choose how you’ll evidence waste movements and performance.
               </p>
@@ -1634,7 +1926,193 @@ setSoftwareName(savedInputs.monitoring?.software_name ?? "");
                 />
               </div>
             </div>
+            </div>
+                </AccordionContent>
+              </AccordionItem>
 
+              <AccordionItem value="responsibilities" className="border rounded-lg px-0 mb-2 overflow-hidden">
+                <AccordionTrigger className="w-full px-4 py-4 bg-muted/40 hover:bg-muted/60 transition-colors [&[data-state=open]]:bg-muted/60 rounded-t-lg data-[state=open]:rounded-b-none">
+                  <span className="flex flex-col items-start text-left gap-0.5">
+                    <span className="font-semibold text-lg">Responsibilities</span>
+                    <span className="text-sm font-normal text-muted-foreground">
+                      {3 + additionalResponsibilities.length} people
+                    </span>
+                  </span>
+                </AccordionTrigger>
+                <AccordionContent className="px-4 pb-4">
+            <div className="space-y-4 rounded-b-lg border border-t-0 border-border p-4 bg-muted/40">
+              <Label className="font-semibold block">Responsibilities (editable)</Label>
+              <p className="text-sm text-muted-foreground">
+                Edit roles, parties, and responsibility text. These appear in the generated SWMP.
+              </p>
+              {responsibilities.map((r, idx) => (
+                <div key={idx} className="border rounded-lg p-4 bg-card space-y-3">
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="grid gap-2">
+                      <Label>Role</Label>
+                      <Input
+                        value={r.role}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setResponsibilities((prev) =>
+                            prev.map((p, i) => (i === idx ? { ...p, role: v } : p))
+                          );
+                        }}
+                        placeholder="e.g. SWMP Owner"
+                        disabled={saveLoading}
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label>Party / name</Label>
+                      <Input
+                        value={r.party}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setResponsibilities((prev) =>
+                            prev.map((p, i) => (i === idx ? { ...p, party: v } : p))
+                          );
+                        }}
+                        placeholder="e.g. Main Contractor"
+                        disabled={saveLoading}
+                      />
+                    </div>
+                  </div>
+                  <div className="grid gap-2">
+                    <Label>Responsibilities (one per line)</Label>
+                    <Textarea
+                      value={r.responsibilities.join("\n")}
+                      onChange={(e) => {
+                        const lines = e.target.value.split("\n").map((s) => s.trim()).filter(Boolean);
+                        setResponsibilities((prev) =>
+                          prev.map((p, i) => (i === idx ? { ...p, responsibilities: lines } : p))
+                        );
+                      }}
+                      rows={3}
+                      placeholder="Maintain SWMP\nCoordinate waste streams"
+                      disabled={saveLoading}
+                    />
+                  </div>
+                </div>
+              ))}
+              <div className="border rounded-lg p-4 bg-card space-y-4 mt-4">
+                <Label className="font-semibold block">Additional people</Label>
+                <p className="text-sm text-muted-foreground">
+                  Add any extra roles (name, role, optional contact, responsibilities).
+                </p>
+                {additionalResponsibilities.map((a, idx) => (
+                  <div key={idx} className="border rounded-lg p-4 bg-muted/30 space-y-3">
+                    <div className="flex justify-end">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() =>
+                          setAdditionalResponsibilities((prev) => prev.filter((_, i) => i !== idx))
+                        }
+                        disabled={saveLoading}
+                        className="text-destructive hover:text-destructive"
+                      >
+                        <XIcon className="size-4 mr-1" />
+                        Remove
+                      </Button>
+                    </div>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="grid gap-2">
+                        <Label>Name</Label>
+                        <Input
+                          value={a.name}
+                          onChange={(e) =>
+                            setAdditionalResponsibilities((prev) =>
+                              prev.map((p, i) => (i === idx ? { ...p, name: e.target.value } : p))
+                            )
+                          }
+                          placeholder="Full name"
+                          disabled={saveLoading}
+                        />
+                      </div>
+                      <div className="grid gap-2">
+                        <Label>Role</Label>
+                        <Input
+                          value={a.role}
+                          onChange={(e) =>
+                            setAdditionalResponsibilities((prev) =>
+                              prev.map((p, i) => (i === idx ? { ...p, role: e.target.value } : p))
+                            )
+                          }
+                          placeholder="e.g. Site foreman"
+                          disabled={saveLoading}
+                        />
+                      </div>
+                      <div className="grid gap-2">
+                        <Label>Email (optional)</Label>
+                        <Input
+                          type="email"
+                          value={a.email ?? ""}
+                          onChange={(e) =>
+                            setAdditionalResponsibilities((prev) =>
+                              prev.map((p, i) => (i === idx ? { ...p, email: e.target.value || undefined } : p))
+                            )
+                          }
+                          placeholder="email@example.com"
+                          disabled={saveLoading}
+                        />
+                      </div>
+                      <div className="grid gap-2">
+                        <Label>Phone (optional)</Label>
+                        <Input
+                          value={a.phone ?? ""}
+                          onChange={(e) =>
+                            setAdditionalResponsibilities((prev) =>
+                              prev.map((p, i) => (i === idx ? { ...p, phone: e.target.value || undefined } : p))
+                            )
+                          }
+                          placeholder=""
+                          disabled={saveLoading}
+                        />
+                      </div>
+                    </div>
+                    <div className="grid gap-2">
+                      <Label>Responsibilities</Label>
+                      <Textarea
+                        value={a.responsibilities}
+                        onChange={(e) =>
+                          setAdditionalResponsibilities((prev) =>
+                            prev.map((p, i) => (i === idx ? { ...p, responsibilities: e.target.value } : p))
+                          )
+                        }
+                        rows={2}
+                        placeholder="Duties for this role"
+                        disabled={saveLoading}
+                      />
+                    </div>
+                  </div>
+                ))}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    setAdditionalResponsibilities((prev) => [...prev, { name: "", role: "", responsibilities: "" }])
+                  }
+                  disabled={saveLoading}
+                >
+                  Add person
+                </Button>
+              </div>
+            </div>
+                </AccordionContent>
+              </AccordionItem>
+
+              <AccordionItem value="notes" className="border rounded-lg px-0 mb-2 overflow-hidden">
+                <AccordionTrigger className="w-full px-4 py-4 bg-muted/40 hover:bg-muted/60 transition-colors [&[data-state=open]]:bg-muted/60 rounded-t-lg data-[state=open]:rounded-b-none">
+                  <span className="flex flex-col items-start text-left gap-0.5">
+                    <span className="font-semibold text-lg">Notes / Additional Context</span>
+                    <span className="text-sm font-normal text-muted-foreground">
+                      {notes.trim() ? "Set" : "Not set"}
+                    </span>
+                  </span>
+                </AccordionTrigger>
+                <AccordionContent className="px-4 pb-4">
             <div className="grid gap-2">
               <Label>Additional notes (optional)</Label>
               <Textarea
@@ -1645,10 +2123,13 @@ setSoftwareName(savedInputs.monitoring?.software_name ?? "");
                 rows={4}
               />
             </div>
+                </AccordionContent>
+              </AccordionItem>
+            </Accordion>
 
             <div className="border rounded-lg p-4 bg-card space-y-3">
-              <Button type="submit" variant="primary" disabled={saveLoading || !requiredOk} className="w-full">
-                {saveLoading ? "Saving…" : "Save inputs"}
+              <Button type="submit" variant="default" size="default" disabled={saveLoading || !requiredOk} className="w-full transition-colors hover:opacity-90">
+                {saveLoading ? "Saving…" : "Save Inputs"}
               </Button>
 
               {saveError ? (
@@ -1669,16 +2150,30 @@ setSoftwareName(savedInputs.monitoring?.software_name ?? "");
           <div className="border rounded-lg p-4 bg-card">
             <Button
               type="button"
-              variant="primary"
-              onClick={handleGenerate}
-              disabled={!requiredOk || saveLoading}
+              variant="default"
               size="lg"
-              className="w-full"
+              onClick={handleGenerate}
+              disabled={!requiredOk || saveLoading || isGenerating}
+              className="w-full transition-colors hover:opacity-90"
             >
-              Generate SWMP
+              {isGenerating ? "Generating…" : "Generate SWMP"}
             </Button>
           </div>
         </FormSection>
+
+        <Dialog open={isGenerating} onOpenChange={() => {}}>
+          <DialogContent showCloseButton={false} className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Generating SWMP</DialogTitle>
+              <DialogDescription>
+                Please wait, this can take up to ~30 seconds.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex items-center justify-center py-4">
+              <Loader2Icon className="size-8 animate-spin text-primary" />
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     </AppShell>
   );

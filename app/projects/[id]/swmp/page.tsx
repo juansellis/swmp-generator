@@ -87,7 +87,7 @@ export default function SwmpPage() {
           <PageHeader
             title="Generated SWMP"
             actions={
-              <Button variant="outline" onClick={() => router.push(`/projects/${projectId}/inputs`)}>
+              <Button variant="outline" size="default" onClick={() => router.push(`/projects/${projectId}/inputs`)} className="transition-colors hover:bg-muted/80">
                 ← Back to inputs
               </Button>
             }
@@ -127,10 +127,10 @@ export default function SwmpPage() {
           }
         />
 
-        <Card>
+        <Card className="overflow-hidden">
           <CardContent className="p-6">
             <div
-              className="prose prose-sm max-w-none"
+              className="prose prose-sm max-w-none dark:prose-invert"
               dangerouslySetInnerHTML={{ __html: swmp?.content_html ?? "<p>No HTML saved.</p>" }}
             />
           </CardContent>

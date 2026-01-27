@@ -36,13 +36,16 @@ export function renderSwmpHtml(swmp: Swmp) {
   const primary = swmp.branding.brand_primary ?? "#111111";
   const secondary = swmp.branding.brand_secondary ?? "#666666";
 
-  // Logo fallback: org logo -> client logo -> "Logo" text
+  // Org logo: primary, left. Client logo: right, smaller when present.
   const orgLogo = swmp.branding.org_logo_url ?? null;
   const clientLogo = swmp.branding.client_logo_url ?? null;
-  const displayLogo = orgLogo || clientLogo;
-  const logoHtml = displayLogo
-    ? `<img src="${esc(displayLogo)}" alt="Logo" />`
+
+  const orgLogoHtml = orgLogo
+    ? `<img src="${esc(orgLogo)}" alt="Organisation logo" style="max-height: 44px; object-fit: contain;" />`
     : `<div style="font-size: 14px; color: #666;">Logo</div>`;
+  const clientLogoHtml = clientLogo
+    ? `<img src="${esc(clientLogo)}" alt="Client logo" style="max-height: 36px; object-fit: contain;" />`
+    : "";
 
   const orgName = swmp.branding.org_name ?? "";
   const clientName = swmp.branding.client_name ?? "";
@@ -113,9 +116,11 @@ export function renderSwmpHtml(swmp: Swmp) {
     body { font-family: Arial, Helvetica, sans-serif; margin: 0; color: #111; background: #f6f7f9; }
     .page { max-width: 980px; margin: 0 auto; padding: 24px 18px 40px; }
     .card { background: #fff; border: 1px solid #eaeaea; border-radius: 14px; padding: 18px; box-shadow: 0 1px 10px rgba(0,0,0,0.03); }
-    .header { display:flex; justify-content: space-between; gap: 14px; align-items: center; padding: 16px; border-radius: 14px; background: #fff; border: 1px solid #eaeaea; }
-    .logos { display:flex; gap: 14px; align-items: center; }
-    .logos img { height: 44px; object-fit: contain; max-width: 240px; }
+    .header { display:flex; justify-content: space-between; gap: 14px; align-items: center; padding: 16px; border-radius: 14px; background: #fff; border: 1px solid #eaeaea; flex-wrap: wrap; }
+    .logos { display:flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+    .logos img { object-fit: contain; }
+    .logos .org-logo { max-height: 44px; max-width: 200px; }
+    .logos .client-logo { max-height: 36px; max-width: 120px; }
     h1 { margin: 0; font-size: 22px; }
     h2 { margin: 18px 0 10px; font-size: 15px; border-left: 3px solid var(--primary); padding-left: 10px; color: var(--primary); }
     .muted { color: #555; font-size: 12px; }
@@ -134,11 +139,12 @@ export function renderSwmpHtml(swmp: Swmp) {
   <div class="page">
     <div class="header">
       <div class="logos">
-        ${logoHtml}
+        <div class="org-logo">${orgLogoHtml}</div>
         <div>
           <div style="font-weight:700;">${esc(swmp.report_title)}</div>
           <div class="muted">${esc(orgName)}${orgName && clientName ? " • " : ""}${esc(clientName)}</div>
         </div>
+        ${clientLogoHtml ? `<div class="client-logo">${clientLogoHtml}</div>` : ""}
       </div>
       <div class="pill">Prepared: ${esc(swmp.date_prepared)}</div>
     </div>

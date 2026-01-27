@@ -197,6 +197,7 @@ export async function POST(req: Request) {
         logistics: (inputs as any).logistics ?? null,
         notes: (inputs as any).notes ?? null,
         hazards: (inputs as any).hazards ?? null,
+        responsibilities: (inputs as any).responsibilities ?? null,
       },
       report: {
         report_title: reportTitle,
@@ -224,23 +225,23 @@ export async function POST(req: Request) {
             "Maintain auditable records (dockets/receipts/photos) and report performance regularly.",
           ],
         },
-        responsibilities: [
-          {
-            role: "SWMP Owner",
-            party: context.project.swmp_owner || "SWMP Owner",
-            responsibilities: ["Maintain SWMP", "Coordinate waste streams and reporting", "Drive improvements"],
-          },
-          {
-            role: "Main Contractor / Site Manager",
-            party: context.project.main_contractor || "Main Contractor",
-            responsibilities: ["Ensure segregation is followed", "Manage contamination", "Coordinate contractor"],
-          },
-          {
-            role: "All trades",
-            party: "Subcontractors",
-            responsibilities: ["Follow segregation rules", "Keep areas tidy", "Report issues promptly"],
-          },
-        ],
+        responsibilities: (() => {
+          const raw = context.inputs.responsibilities;
+          if (Array.isArray(raw) && raw.length >= 3) {
+            return raw.slice(0, 3).map((r: any) => ({
+              role: String(r?.role ?? "").trim() || "Role",
+              party: String(r?.party ?? "").trim() || "—",
+              responsibilities: Array.isArray(r?.responsibilities) && r.responsibilities.length > 0
+                ? r.responsibilities.map((x: any) => String(x ?? "").trim()).filter(Boolean)
+                : ["—"],
+            }));
+          }
+          return [
+            { role: "SWMP Owner", party: context.project.swmp_owner || "SWMP Owner", responsibilities: ["Maintain SWMP", "Coordinate waste streams and reporting", "Drive improvements"] },
+            { role: "Main Contractor / Site Manager", party: context.project.main_contractor || "Main Contractor", responsibilities: ["Ensure segregation is followed", "Manage contamination", "Coordinate contractor"] },
+            { role: "All trades", party: "Subcontractors", responsibilities: ["Follow segregation rules", "Keep areas tidy", "Report issues promptly"] },
+          ];
+        })(),
         waste_streams: ensuredWasteStreams.map((s: any) => ({
           stream: String(s),
           segregation_method: "Separate where practical",
@@ -327,6 +328,37 @@ Output must follow the provided schema exactly.
 
     // Validate against schema (defensive)
     swmp = SwmpSchema.parse(swmp);
+
+    // Overlay saved responsibilities when present (so edited text is used in output)
+    const savedResp = (inputs as any).responsibilities;
+    if (Array.isArray(savedResp)) {
+      const main = savedResp.filter((r: any) => !r?.__additional);
+      if (main.length >= 3) {
+        swmp.responsibilities = main.slice(0, 3).map((r: any) => ({
+          role: String(r?.role ?? "").trim() || "Role",
+          party: String(r?.party ?? "").trim() || "—",
+          responsibilities: Array.isArray(r?.responsibilities) && r.responsibilities.length
+            ? r.responsibilities.map((x: any) => String(x ?? "").trim()).filter(Boolean)
+            : ["—"],
+        }));
+      }
+      // Additional people: stored inside responsibilities with __additional: true (no separate column)
+      const additional = (inputs as any).additional_responsibilities ?? savedResp.filter((r: any) => r?.__additional);
+      if (Array.isArray(additional) && additional.length > 0) {
+        const extra = additional
+          .filter((a: any) => (a?.name ?? "").toString().trim() || (a?.role ?? "").toString().trim() || (a?.responsibilities ?? "").toString().trim())
+          .map((a: any) => ({
+            role: String(a?.role ?? "").trim() || "—",
+            party: String(a?.name ?? "").trim() || "—",
+            responsibilities: typeof a?.responsibilities === "string"
+              ? a.responsibilities.split(/\r?\n/).map((s: string) => s.trim()).filter(Boolean)
+              : Array.isArray(a?.responsibilities)
+                ? (a.responsibilities as any[]).map((x: any) => String(x ?? "").trim()).filter(Boolean)
+                : ["—"],
+          }));
+        swmp.responsibilities = [...(swmp.responsibilities ?? []), ...extra];
+      }
+    }
 
     // 5) Render HTML for viewing/export (deterministic renderer uses swmp.branding/footer_text)
     const html = renderSwmpHtml(swmp);
