@@ -5,8 +5,9 @@ import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
 import { AppShell } from "@/components/app-shell";
-import { FormSection } from "@/components/form-section";
+import { SubPanel } from "@/components/form-section";
 import { PageHeader } from "@/components/page-header";
+import { SectionCard } from "@/components/ui/section-card";
 import { Notice } from "@/components/notice";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -31,6 +32,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Separator } from "@/components/ui/separator";
 import {
   Accordion,
   AccordionContent,
@@ -845,7 +847,7 @@ export default function ProjectInputsPage() {
           }
         />
 
-        <FormSection
+        <SectionCard
           title="Project Details (Required)"
           description="Complete these fields to enable Save inputs and Generate SWMP."
         >
@@ -944,7 +946,7 @@ export default function ProjectInputsPage() {
             </div>
           </div>
 
-          <div className="mt-4 border rounded-lg p-4 bg-card">
+          <SubPanel className="mt-4 shadow-sm border-muted-foreground/15">
             <Button
               type="button"
               variant="primary"
@@ -997,8 +999,8 @@ export default function ProjectInputsPage() {
             >
               Save project details
             </Button>
-          </div>
-        </FormSection>
+          </SubPanel>
+        </SectionCard>
 
         <Accordion type="single" collapsible defaultValue="" className="rounded-xl border bg-card text-card-foreground shadow-sm overflow-hidden">
           <AccordionItem value="report" className="border-b-0 px-0">
@@ -1018,7 +1020,7 @@ export default function ProjectInputsPage() {
             {saveProjectMsg ? (
               <Notice type="success" title="Success" message={saveProjectMsg} className="mb-4" />
             ) : null}
-            <div className="rounded-lg border border-border p-4 bg-muted/40 space-y-4">
+            <SubPanel className="bg-muted/30 space-y-4">
           <div className="grid gap-4">
             <div className="grid gap-2">
               <Label>Client name</Label>
@@ -1157,12 +1159,12 @@ export default function ProjectInputsPage() {
               />
             </div>
 
-            <div className="mt-4 rounded-lg p-4 bg-muted/40 border border-border">
+            <SubPanel className="mt-4 shadow-sm">
               <Button
                 type="button"
-                variant="default"
+                variant="primary"
                 size="default"
-                className="transition-colors hover:opacity-90"
+                className="w-full"
                 onClick={async () => {
                   setSaveProjectMsg(null);
                   setSaveProjectError(null);
@@ -1191,15 +1193,15 @@ export default function ProjectInputsPage() {
               >
                 Save report settings
               </Button>
-            </div>
+            </SubPanel>
           </div>
-            </div>
+          </SubPanel>
           </div>
             </AccordionContent>
           </AccordionItem>
         </Accordion>
 
-        <FormSection title="Plan Settings" description="Configure waste streams, constraints, and monitoring.">
+        <SectionCard title="Plan Settings" description="Configure waste streams, constraints, and monitoring.">
           <form onSubmit={handleSaveInputs} className="grid gap-6">
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="grid gap-2">
@@ -1264,6 +1266,8 @@ export default function ProjectInputsPage() {
               </div>
             </div>
 
+            <Separator className="my-4" />
+
             <div>
               <Label className="mb-3 block font-semibold">Site constraints</Label>
               <div className="grid gap-3 sm:grid-cols-2">
@@ -1281,6 +1285,8 @@ export default function ProjectInputsPage() {
                 ))}
               </div>
             </div>
+
+            <Separator className="my-4" />
 
             <div>
               <Label className="mb-3 block text-lg font-semibold">Waste Streams Anticipated</Label>
@@ -1355,18 +1361,20 @@ export default function ProjectInputsPage() {
                       className="flex items-center gap-2 px-3 py-1.5 bg-muted border border-border rounded-full"
                     >
                       <span>{s}</span>
-                      <button
+                      <Button
                         type="button"
+                        variant="ghost"
+                        size="icon-xs"
                         onClick={(e) => {
                           e.stopPropagation();
                           setSelectedWasteStreams((prev) => prev.filter((x) => x !== s));
                         }}
-                        className="ml-1 rounded-full hover:bg-secondary-foreground/20 p-0.5 transition-colors"
+                        className="ml-1 h-5 w-5 rounded-full p-0"
                         aria-label={`Remove ${s}`}
                         title="Remove"
                       >
                         <XIcon className="size-3" />
-                      </button>
+                      </Button>
                     </Badge>
                   ))}
                 </div>
@@ -1874,7 +1882,7 @@ export default function ProjectInputsPage() {
               </Select>
               </div>
 
-              <div className="border rounded-lg bg-card p-4 space-y-4">
+              <SubPanel className="space-y-4">
                 <Label className="font-semibold">Monitoring evidence</Label>
               <p className="text-sm text-muted-foreground">
               Choose how you’ll evidence waste movements and performance.
@@ -1925,7 +1933,7 @@ export default function ProjectInputsPage() {
                   disabled={saveLoading}
                 />
               </div>
-            </div>
+            </SubPanel>
             </div>
                 </AccordionContent>
               </AccordionItem>
@@ -1940,13 +1948,13 @@ export default function ProjectInputsPage() {
                   </span>
                 </AccordionTrigger>
                 <AccordionContent className="px-4 pb-4">
-            <div className="space-y-4 rounded-b-lg border border-t-0 border-border p-4 bg-muted/40">
+            <SubPanel className="space-y-4 bg-muted/30">
               <Label className="font-semibold block">Responsibilities (editable)</Label>
               <p className="text-sm text-muted-foreground">
                 Edit roles, parties, and responsibility text. These appear in the generated SWMP.
               </p>
               {responsibilities.map((r, idx) => (
-                <div key={idx} className="border rounded-lg p-4 bg-card space-y-3">
+                <SubPanel key={idx} className="space-y-3">
                   <div className="grid gap-4 sm:grid-cols-2">
                     <div className="grid gap-2">
                       <Label>Role</Label>
@@ -1992,9 +2000,9 @@ export default function ProjectInputsPage() {
                       disabled={saveLoading}
                     />
                   </div>
-                </div>
+                </SubPanel>
               ))}
-              <div className="border rounded-lg p-4 bg-card space-y-4 mt-4">
+              <SubPanel className="space-y-4 mt-4">
                 <Label className="font-semibold block">Additional people</Label>
                 <p className="text-sm text-muted-foreground">
                   Add any extra roles (name, role, optional contact, responsibilities).
@@ -2098,8 +2106,8 @@ export default function ProjectInputsPage() {
                 >
                   Add person
                 </Button>
-              </div>
-            </div>
+            </SubPanel>
+            </SubPanel>
                 </AccordionContent>
               </AccordionItem>
 
@@ -2113,22 +2121,24 @@ export default function ProjectInputsPage() {
                   </span>
                 </AccordionTrigger>
                 <AccordionContent className="px-4 pb-4">
-            <div className="grid gap-2">
-              <Label>Additional notes (optional)</Label>
-              <Textarea
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="Anything site-specific that should be reflected in the SWMP."
-                disabled={saveLoading}
-                rows={4}
-              />
-            </div>
+            <SubPanel>
+              <div className="grid gap-2">
+                <Label>Additional notes (optional)</Label>
+                <Textarea
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="Anything site-specific that should be reflected in the SWMP."
+                  disabled={saveLoading}
+                  rows={4}
+                />
+              </div>
+            </SubPanel>
                 </AccordionContent>
               </AccordionItem>
             </Accordion>
 
-            <div className="border rounded-lg p-4 bg-card space-y-3">
-              <Button type="submit" variant="default" size="default" disabled={saveLoading || !requiredOk} className="w-full transition-colors hover:opacity-90">
+            <SubPanel className="shadow-sm space-y-3 border-muted-foreground/15">
+              <Button type="submit" variant="primary" size="default" disabled={saveLoading || !requiredOk} className="w-full">
                 {saveLoading ? "Saving…" : "Save Inputs"}
               </Button>
 
@@ -2139,27 +2149,27 @@ export default function ProjectInputsPage() {
               {saveMessage ? (
                 <Notice type="success" title="Success" message={saveMessage} />
               ) : null}
-            </div>
+            </SubPanel>
           </form>
-        </FormSection>
+        </SectionCard>
 
-        <FormSection
+        <SectionCard
           title="Generate SWMP"
           description="Generate the final Site Waste Management Plan document."
         >
-          <div className="border rounded-lg p-4 bg-card">
+          <SubPanel className="shadow-sm border-muted-foreground/15">
             <Button
               type="button"
-              variant="default"
+              variant="primary"
               size="lg"
               onClick={handleGenerate}
               disabled={!requiredOk || saveLoading || isGenerating}
-              className="w-full transition-colors hover:opacity-90"
+              className="w-full"
             >
               {isGenerating ? "Generating…" : "Generate SWMP"}
             </Button>
-          </div>
-        </FormSection>
+          </SubPanel>
+        </SectionCard>
 
         <Dialog open={isGenerating} onOpenChange={() => {}}>
           <DialogContent showCloseButton={false} className="sm:max-w-md">

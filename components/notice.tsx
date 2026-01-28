@@ -11,9 +11,11 @@ type NoticeProps = {
 
 export function Notice({ type, title, message, className }: NoticeProps) {
   const styles = {
-    success: "border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-100",
-    error: "border-red-200 bg-red-50 text-red-900 dark:border-red-800 dark:bg-red-950 dark:text-red-100",
-    info: "border-slate-200 bg-slate-50 text-slate-900 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100",
+    success:
+      "border-emerald-200 bg-emerald-50 text-emerald-900 [&_[data-slot=alert-description]]:text-emerald-800",
+    error:
+      "border-red-200 bg-red-50 text-red-900 [&_[data-slot=alert-description]]:text-red-800",
+    info: "border-slate-200 bg-slate-50 text-slate-900",
   }
 
   return (

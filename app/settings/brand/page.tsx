@@ -5,8 +5,9 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
 import { AppShell } from "@/components/app-shell";
-import { FormSection } from "@/components/form-section";
+import { SubPanel } from "@/components/form-section";
 import { PageHeader } from "@/components/page-header";
+import { SectionCard } from "@/components/ui/section-card";
 import { Notice } from "@/components/notice";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -190,7 +191,7 @@ export default function BrandSettingsPage() {
           title="Brand Settings"
           subtitle="Customise your organisation's branding and contact information."
           actions={
-            <Button variant="outline" size="default" onClick={() => router.push("/projects")} className="transition-colors hover:bg-muted/80">
+            <Button variant="outline" size="default" onClick={() => router.push("/projects")}>
               ← Back
             </Button>
           }
@@ -204,22 +205,23 @@ export default function BrandSettingsPage() {
           <Notice type="success" title="Success" message={saveMsg} />
         ) : null}
 
-        <FormSection
+        <SectionCard
           title="Organisation"
           description="Configure your organisation's branding, contact information and logo."
-          className="overflow-hidden"
-          contentClassName="overflow-hidden"
+          contentClassName="space-y-6 min-w-0"
         >
-          <div className="grid gap-6 w-full">
+          <SubPanel>
             <div className="grid gap-2">
               <Label>Organisation name</Label>
-              <Input value={name} onChange={(e) => setName(e.target.value)} className="w-full" />
+              <Input value={name} onChange={(e) => setName(e.target.value)} className="w-full min-w-0" />
             </div>
+          </SubPanel>
 
+          <SubPanel>
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="grid gap-2">
                 <Label>Primary colour</Label>
-                <div className="flex gap-2">
+                <div className="flex gap-2 min-w-0">
                   <Input
                     type="color"
                     value={brandPrimary}
@@ -234,10 +236,9 @@ export default function BrandSettingsPage() {
                   />
                 </div>
               </div>
-
               <div className="grid gap-2">
                 <Label>Secondary colour</Label>
-                <div className="flex gap-2">
+                <div className="flex gap-2 min-w-0">
                   <Input
                     type="color"
                     value={brandSecondary}
@@ -253,7 +254,9 @@ export default function BrandSettingsPage() {
                 </div>
               </div>
             </div>
+          </SubPanel>
 
+          <SubPanel>
             <div className="grid gap-2">
               <Label>Footer / disclaimer text</Label>
               <Textarea
@@ -261,10 +264,12 @@ export default function BrandSettingsPage() {
                 onChange={(e) => setFooterText(e.target.value)}
                 rows={3}
                 placeholder="Text to display in the footer of generated SWMP reports"
-                className="w-full"
+                className="w-full min-w-0"
               />
             </div>
+          </SubPanel>
 
+          <SubPanel>
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="grid gap-2">
                 <Label>Contact email</Label>
@@ -273,10 +278,9 @@ export default function BrandSettingsPage() {
                   value={contactEmail}
                   onChange={(e) => setContactEmail(e.target.value)}
                   placeholder="contact@example.com"
-                  className="w-full"
+                  className="w-full min-w-0"
                 />
               </div>
-
               <div className="grid gap-2">
                 <Label>Contact phone</Label>
                 <Input
@@ -284,51 +288,47 @@ export default function BrandSettingsPage() {
                   value={contactPhone}
                   onChange={(e) => setContactPhone(e.target.value)}
                   placeholder="+64 9 123 4567"
-                  className="w-full"
+                  className="w-full min-w-0"
                 />
               </div>
             </div>
-
-            <div className="grid gap-2">
+            <div className="grid gap-2 mt-4">
               <Label>Website</Label>
               <Input
                 type="url"
                 value={website}
                 onChange={(e) => setWebsite(e.target.value)}
                 placeholder="https://example.com"
-                className="w-full"
+                className="w-full min-w-0"
               />
             </div>
+          </SubPanel>
 
+          <SubPanel>
             <div className="grid gap-3">
               <Label>Logo</Label>
-
               {logoUrl ? (
-                <div className="w-full rounded-lg border p-3 overflow-hidden">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="shrink-0 h-16 w-16 rounded-md border bg-white flex items-center justify-center overflow-hidden">
-                      <img
-                        src={logoUrl}
-                        alt="Organisation logo"
-                        className="h-full w-full object-contain"
-                      />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium">Current logo</p>
-                      <p className="text-xs text-muted-foreground break-all">{logoUrl}</p>
-                    </div>
-                    <div className="shrink-0">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setLogoUrl("")}
-                      >
-                        <XIcon className="size-4" />
-                        Remove
-                      </Button>
-                    </div>
+                <div className="flex items-center gap-3 min-w-0 flex-wrap">
+                  <div className="shrink-0 h-16 w-16 rounded-md border bg-white flex items-center justify-center overflow-hidden">
+                    <img
+                      src={logoUrl}
+                      alt="Organisation logo"
+                      className="h-full w-full object-contain"
+                    />
                   </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium">Current logo</p>
+                    <p className="text-xs text-muted-foreground break-all">{logoUrl}</p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setLogoUrl("")}
+                  >
+                    <XIcon className="size-4" />
+                    Remove
+                  </Button>
                 </div>
               ) : (
                 <div className="border-2 border-dashed rounded-lg p-6 text-center bg-muted/30">
@@ -336,7 +336,6 @@ export default function BrandSettingsPage() {
                   <p className="text-sm text-muted-foreground mb-3">No logo uploaded yet</p>
                 </div>
               )}
-
               {uploading && (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between text-sm">
@@ -351,8 +350,7 @@ export default function BrandSettingsPage() {
                   </div>
                 </div>
               )}
-
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <Input
                   type="file"
                   accept="image/png,image/jpeg,image/svg+xml"
@@ -361,7 +359,7 @@ export default function BrandSettingsPage() {
                     if (f) handleLogoUpload(f);
                   }}
                   disabled={uploading}
-                  className="flex-1"
+                  className="flex-1 min-w-[140px]"
                 />
                 <Button
                   type="button"
@@ -386,14 +384,14 @@ export default function BrandSettingsPage() {
                 Supported formats: PNG, JPEG, SVG. Maximum file size recommended: 2MB.
               </p>
             </div>
+          </SubPanel>
 
-            <div className="border rounded-lg p-4 bg-card">
-              <Button variant="default" size="default" onClick={handleSave} disabled={uploading} className="w-full transition-colors hover:opacity-90">
-                Save Settings
-              </Button>
-            </div>
-          </div>
-        </FormSection>
+          <SubPanel className="shadow-sm">
+            <Button variant="primary" size="default" onClick={handleSave} disabled={uploading} className="w-full">
+              Save Settings
+            </Button>
+          </SubPanel>
+        </SectionCard>
       </div>
     </AppShell>
   );

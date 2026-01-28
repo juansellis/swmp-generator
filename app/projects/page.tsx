@@ -5,8 +5,8 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
 import { AppShell } from "@/components/app-shell";
-import { FormSection } from "@/components/form-section";
 import { PageHeader } from "@/components/page-header";
+import { SectionCard } from "@/components/ui/section-card";
 import { Notice } from "@/components/notice";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -308,10 +308,10 @@ export default function ProjectsPage() {
           }
           actions={
             <div className="flex items-center gap-2">
-              <Button variant="outline" size="default" onClick={() => router.push("/settings/brand")} className="transition-colors hover:bg-muted/80">
+              <Button variant="outline" size="default" onClick={() => router.push("/settings/brand")}>
                 Brand Settings
               </Button>
-              <Button variant="outline" size="default" onClick={handleSignOut} className="transition-colors hover:bg-muted/80">
+              <Button variant="outline" size="default" onClick={handleSignOut}>
                 Sign out
               </Button>
             </div>
@@ -327,7 +327,7 @@ export default function ProjectsPage() {
 
         <div className="grid gap-6 lg:grid-cols-5">
           <div className="lg:col-span-2">
-            <FormSection
+            <SectionCard
               title="Create a New Project"
               description="Create a project, then go straight to inputs."
             >
@@ -478,10 +478,9 @@ export default function ProjectsPage() {
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <Button
                     type="submit"
-                    variant="default"
+                    variant="primary"
                     size="default"
                     disabled={createLoading || !canCreate}
-                    className="transition-colors hover:opacity-90"
                   >
                     {createLoading ? "Creating…" : "Create Project"}
                   </Button>
@@ -506,15 +505,15 @@ export default function ProjectsPage() {
                   />
                 ) : null}
               </form>
-            </FormSection>
+            </SectionCard>
           </div>
 
           <div className="lg:col-span-3">
-            <FormSection
+            <SectionCard
               title="Your Projects"
               description="Open a project to edit inputs and generate its SWMP."
               actions={
-                <Button variant="outline" size="default" onClick={fetchProjects} disabled={listLoading} className="transition-colors hover:bg-muted/80">
+                <Button variant="outline" size="default" onClick={fetchProjects} disabled={listLoading}>
                   {listLoading ? "Refreshing…" : "Refresh"}
                 </Button>
               }
@@ -587,7 +586,7 @@ export default function ProjectsPage() {
                   </TableBody>
                 </Table>
               )}
-            </FormSection>
+            </SectionCard>
           </div>
         </div>
       </div>

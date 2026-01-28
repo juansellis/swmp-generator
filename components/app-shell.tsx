@@ -9,6 +9,8 @@ type AppShellProps = {
   className?: string
   containerClassName?: string
   hideHeader?: boolean
+  /** When true (e.g. login), page has solid background instead of tinted */
+  noPageTint?: boolean
 }
 
 export function AppShell({
@@ -17,12 +19,19 @@ export function AppShell({
   className,
   containerClassName,
   hideHeader = false,
+  noPageTint = false,
 }: AppShellProps) {
   return (
-    <div className={cn("min-h-screen bg-background text-foreground", className)}>
+    <div
+      className={cn(
+        "min-h-screen text-foreground",
+        noPageTint ? "bg-background" : "bg-slate-50",
+        className
+      )}
+    >
       {!hideHeader ? (
-        <div className="border-b bg-background">
-          <div className={cn("mx-auto w-full max-w-5xl px-4 py-3 sm:px-6", containerClassName)}>
+        <div className="sticky top-0 z-10 border-b border-border/80 bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+          <div className={cn("mx-auto w-full max-w-6xl px-4 py-3", containerClassName)}>
             <div className="flex items-center gap-4">
               <Logo height={36} href="/projects" className="h-9 w-auto" />
               {topNav ? <div className="flex-1">{topNav}</div> : null}
@@ -31,8 +40,10 @@ export function AppShell({
         </div>
       ) : null}
 
-      <main className={cn("flex-1 bg-muted/30", className)}>
-        <div className={cn("mx-auto w-full max-w-5xl px-4 py-8 sm:px-6 space-y-6", containerClassName)}>
+      <main className={cn("flex-1", className)}>
+        <div
+          className={cn("mx-auto w-full max-w-6xl px-4 py-6 space-y-6", containerClassName)}
+        >
           {children}
         </div>
       </main>
