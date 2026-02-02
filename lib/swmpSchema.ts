@@ -7,6 +7,16 @@ import { z } from "zod";
 export const OutcomeEnum = z.enum(["Reuse", "Recycle", "Cleanfill", "Landfill"]);
 export type Outcome = z.infer<typeof OutcomeEnum>;
 
+export const IntendedOutcomeEnum = z.enum([
+  "Reduce",
+  "Reuse",
+  "Recycle",
+  "Recover",
+  "Cleanfill",
+  "Landfill",
+]);
+export type IntendedOutcome = z.infer<typeof IntendedOutcomeEnum>;
+
 export const MonitoringMethodEnum = z.enum([
   "Dockets",
   "Invoices/receipts",
@@ -53,30 +63,76 @@ export const ResponsibilitySchema = z.object({
   responsibilities: z.array(z.string()).min(1),
 });
 
-// Accept both legacy `outcome: string` and new `outcomes: string[]` and normalize.
+// Accept legacy outcome/outcomes and normalize to intended_outcomes.
+// Legacy unit "skip" -> "m2", "load" -> "L" for backward compatibility.
+function normalizeToIntendedOutcomes(val: unknown): string[] {
+  if (Array.isArray(val)) {
+    const allowed = new Set(["Reduce", "Reuse", "Recycle", "Recover", "Cleanfill", "Landfill"]);
+    return (val as any[])
+      .map((x) => {
+        const s = String(x ?? "").trim();
+        if (s === "Dispose") return "Landfill";
+        if (s === "Recover") return "Recover";
+        if (s === "Clean fill") return "Cleanfill";
+        return s;
+      })
+      .filter((s) => allowed.has(s));
+  }
+  if (typeof val === "string" && val.trim()) {
+    const s = val.trim();
+    if (s === "Dispose") return ["Landfill"];
+    if (s === "Recover") return ["Recover"];
+    if (s === "Clean fill") return ["Cleanfill"];
+    if (["Reduce", "Reuse", "Recycle", "Recover", "Cleanfill", "Landfill"].includes(s))
+      return [s];
+  }
+  return [];
+}
+
 export const WasteStreamPlanSchema = z.preprocess((val) => {
   if (!val || typeof val !== "object") return val;
   const v = val as any;
 
-  if (!Array.isArray(v.outcomes) && typeof v.outcome === "string") {
-    v.outcomes = [v.outcome];
+  if (!Array.isArray(v.intended_outcomes)) {
+    const rawOutcomes = Array.isArray(v.outcomes)
+      ? v.outcomes
+      : typeof v.outcome === "string"
+        ? [v.outcome]
+        : [];
+    v.intended_outcomes = normalizeToIntendedOutcomes(rawOutcomes).length
+      ? normalizeToIntendedOutcomes(rawOutcomes)
+      : ["Recycle"];
   }
 
-  if (Array.isArray(v.outcomes)) {
-    v.outcomes = v.outcomes.map(normalizeOutcomeValue);
+  // Normalize quantity: accept estimated_quantity or estimated_qty
+  if (v.estimated_qty == null && typeof v.estimated_quantity === "number") {
+    v.estimated_qty = v.estimated_quantity;
   }
+
+  // Normalize unit: legacy skip -> m2, load -> L
+  if (v.unit === "skip") v.unit = "m2";
+  if (v.unit === "load") v.unit = "L";
 
   return v;
 }, z.object({
   category: z.string().min(1),
   sub_material: z.string().optional().nullable(),
-  outcomes: z.array(OutcomeEnum).min(1),
+  intended_outcomes: z.array(IntendedOutcomeEnum).min(1),
+  partner_id: z.string().optional().nullable(),
+  facility_id: z.string().optional().nullable(),
+  destination_override: z.string().optional().nullable(),
   partner: z.string().optional().nullable(),
   partner_overridden: z.boolean().optional().default(false),
   pathway: z.string().min(1),
   notes: z.string().optional().nullable(),
-  estimated_qty: z.number().optional().nullable(),
-  unit: z.enum(["kg", "t", "m3", "skip", "load"]).optional().nullable(),
+  estimated_qty: z.number().min(0).optional().nullable(),
+  unit: z.enum(["kg", "t", "m3", "m2", "L"]).optional().nullable(),
+  density_kg_m3: z.number().min(0).optional().nullable(),
+  thickness_m: z.number().min(0).optional().nullable(),
+  generated_by: z.string().optional().nullable(),
+  on_site_management: z.string().optional().nullable(),
+  destination: z.string().optional().nullable(),
+  distance_km: z.number().min(0).optional().nullable(),
 }));
 
 export const WasteStreamRowSchema = z.object({

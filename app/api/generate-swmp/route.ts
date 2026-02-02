@@ -10,6 +10,28 @@ import { zodTextFormat } from "openai/helpers/zod";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { SwmpSchema } from "@/lib/swmpSchema";
 import { renderSwmpHtml } from "@/lib/renderSwmp";
+import {
+  normalizeSwmpInputs,
+  SWMP_INPUTS_JSON_COLUMN,
+  type SiteControlsInput,
+} from "@/lib/swmp/schema";
+
+/** Build on_site_controls arrays from inputs; pad to meet schema min lengths (2,2,3,2). */
+function buildOnSiteControlsFromInputs(sc: SiteControlsInput | undefined) {
+  const raw: Partial<SiteControlsInput> = sc ?? {};
+  const toArr = (s: string | undefined) =>
+    (s ?? "").trim()
+      ? (String(s).trim().split(/\r?\n/).map((l) => l.trim()).filter(Boolean))
+      : ["—"];
+  const pad = (arr: string[], min: number) =>
+    arr.length >= min ? arr : [...arr, ...Array.from({ length: min - arr.length }, () => "—")];
+  return {
+    bin_setup: pad(toArr(raw.bin_setup), 2),
+    signage_and_storage: pad(toArr(raw.signage_storage), 2),
+    contamination_controls: pad(toArr(raw.contamination_controls), 3),
+    hazardous_controls: pad(toArr(raw.hazardous_controls), 2),
+  };
+}
 
 export const runtime = "nodejs"; // ensure Node runtime for OpenAI SDK
 
@@ -54,6 +76,13 @@ export async function POST(req: Request) {
       );
     }
 
+    const jsonCol = (inputs as Record<string, unknown>)[SWMP_INPUTS_JSON_COLUMN];
+    const rawInputs =
+      jsonCol != null && typeof jsonCol === "object"
+        ? { ...(jsonCol as Record<string, unknown>), project_id }
+        : { project_id };
+    const normalizedInputs = normalizeSwmpInputs(rawInputs);
+
     // Fetch org branding (if available) via org_members
     let orgBrand: any = null;
     if ((project as any).user_id) {
@@ -85,12 +114,8 @@ export async function POST(req: Request) {
     }
 
     // Ensure we always have >= 4 streams to satisfy SwmpSchema.min(4)
-    // (users may select fewer streams in the UI)
     const ensuredWasteStreams = (() => {
-      const selected = Array.isArray((inputs as any).waste_streams)
-        ? (inputs as any).waste_streams.map((x: any) => String(x)).filter(Boolean)
-        : [];
-
+      const selected = [...normalizedInputs.waste_streams];
       const unique = Array.from(new Set(selected));
       const defaults = [
         "Mixed C&D",
@@ -100,49 +125,17 @@ export async function POST(req: Request) {
         "Plasterboard / GIB",
         "Concrete / masonry",
       ];
-
       for (const d of defaults) {
         if (unique.length >= 4) break;
         if (!unique.includes(d)) unique.push(d);
       }
-
-      // As a final fallback, pad with generic streams.
       while (unique.length < 4) {
         unique.push(`Other stream ${unique.length + 1}`);
       }
-
       return unique;
     })();
 
-    // Normalize waste stream plans to the new schema shape (outcomes[])
-    const ensuredWasteStreamPlans = (() => {
-      const raw = Array.isArray((inputs as any).waste_stream_plans)
-        ? (inputs as any).waste_stream_plans
-        : [];
-
-      return raw.map((p: any) => {
-        const rawOutcomes = Array.isArray(p?.outcomes)
-          ? p.outcomes
-          : typeof p?.outcome === "string"
-            ? [p.outcome]
-            : ["Recycle"];
-
-        const mapOutcome = (x: any) => {
-          const s = String(x ?? "").trim();
-          if (s === "Dispose") return "Landfill";
-          if (s === "Recover") return "Recycle";
-          if (s === "Clean fill") return "Cleanfill";
-          return s;
-        };
-
-        const outcomes = rawOutcomes.map(mapOutcome);
-
-        return {
-          ...p,
-          outcomes,
-        };
-      });
-    })();
+    const ensuredWasteStreamPlans = normalizedInputs.waste_stream_plans;
 
     // 3) Determine next version number
     const { data: existing, error: existingErr } = await supabaseAdmin
@@ -188,16 +181,22 @@ export async function POST(req: Request) {
         swmp_owner: project.swmp_owner ?? "",
       },
       inputs: {
-        sorting_level: (inputs as any).sorting_level ?? null,
-        target_diversion: (inputs as any).target_diversion ?? null,
-        constraints: (inputs as any).constraints ?? [],
+        sorting_level: normalizedInputs.sorting_level,
+        target_diversion: normalizedInputs.target_diversion,
+        constraints: normalizedInputs.constraints,
         waste_streams: ensuredWasteStreams,
         waste_stream_plans: ensuredWasteStreamPlans,
-        monitoring: (inputs as any).monitoring ?? null,
-        logistics: (inputs as any).logistics ?? null,
-        notes: (inputs as any).notes ?? null,
-        hazards: (inputs as any).hazards ?? null,
-        responsibilities: (inputs as any).responsibilities ?? null,
+        monitoring: normalizedInputs.monitoring,
+        logistics: normalizedInputs.logistics,
+        notes: normalizedInputs.notes,
+        hazards: normalizedInputs.hazards,
+        responsibilities: [
+          ...normalizedInputs.responsibilities,
+          ...normalizedInputs.additional_responsibilities.map((a) => ({
+            __additional: true,
+            ...a,
+          })),
+        ],
       },
       report: {
         report_title: reportTitle,
@@ -218,7 +217,7 @@ export async function POST(req: Request) {
         branding: context.branding,
         project: context.project,
         objectives: {
-          diversion_target_percent: Number((inputs as any).target_diversion ?? 70),
+          diversion_target_percent: Number(normalizedInputs.target_diversion ?? 70),
           primary_objectives: [
             "Maximise diversion of recoverable materials via on-site separation where practical.",
             "Minimise contamination through clear signage, storage controls, and trade engagement.",
@@ -256,25 +255,7 @@ export async function POST(req: Request) {
           software_name: context.inputs.monitoring?.software_name ?? null,
           dockets_description: context.inputs.monitoring?.dockets_description ?? footerText ?? null,
         },
-        on_site_controls: {
-          bin_setup: [
-            "Provide dedicated skips/cages for key streams where feasible.",
-            "Locate bins close to workfaces where safe to reduce contamination.",
-          ],
-          signage_and_storage: [
-            "Install clear signage with examples for each stream.",
-            "Keep cardboard/plasterboard dry (covered storage).",
-          ],
-          contamination_controls: [
-            "Weekly inspections and contamination spot checks.",
-            "Remove contaminants immediately and brief responsible trade.",
-            "Minimise mixed waste by improving bin placement/signage.",
-          ],
-          hazardous_controls: [
-            "Segregate regulated materials and use licensed contractors where required.",
-            "Retain disposal documentation and approvals (e.g. cleanfill acceptance).",
-          ],
-        },
+        on_site_controls: buildOnSiteControlsFromInputs(normalizedInputs.site_controls),
         records_and_evidence: {
           evidence_methods: Array.isArray(context.inputs.monitoring?.methods)
             ? context.inputs.monitoring.methods
@@ -284,8 +265,8 @@ export async function POST(req: Request) {
             "Photos of bins and signage",
             "Monthly summaries and corrective action notes",
           ],
-          reporting_cadence: String((inputs as any).logistics?.reporting_cadence ?? "Monthly"),
-          notes: context.inputs.monitoring?.dockets_description ?? null,
+          reporting_cadence: String(normalizedInputs.logistics?.reporting_cadence ?? "Monthly"),
+          notes: normalizedInputs.notes ?? null,
         },
         assumptions: [
           "Final bin configuration and waste contractor details to be confirmed at site establishment.",
@@ -329,36 +310,35 @@ Output must follow the provided schema exactly.
     // Validate against schema (defensive)
     swmp = SwmpSchema.parse(swmp);
 
-    // Overlay saved responsibilities when present (so edited text is used in output)
-    const savedResp = (inputs as any).responsibilities;
-    if (Array.isArray(savedResp)) {
-      const main = savedResp.filter((r: any) => !r?.__additional);
-      if (main.length >= 3) {
-        swmp.responsibilities = main.slice(0, 3).map((r: any) => ({
-          role: String(r?.role ?? "").trim() || "Role",
-          party: String(r?.party ?? "").trim() || "—",
-          responsibilities: Array.isArray(r?.responsibilities) && r.responsibilities.length
-            ? r.responsibilities.map((x: any) => String(x ?? "").trim()).filter(Boolean)
-            : ["—"],
+    // Overlay saved inputs so report reflects user data (notes, responsibilities)
+    if (normalizedInputs.notes != null && normalizedInputs.notes.trim() !== "") {
+      swmp.records_and_evidence = swmp.records_and_evidence ?? {};
+      swmp.records_and_evidence.notes = normalizedInputs.notes.trim();
+    }
+    if (normalizedInputs.responsibilities.length >= 3) {
+      swmp.responsibilities = normalizedInputs.responsibilities.slice(0, 3).map((r) => ({
+        role: r.role.trim() || "Role",
+        party: r.party.trim() || "—",
+        responsibilities: r.responsibilities.length ? r.responsibilities : ["—"],
+      }));
+    }
+    if (normalizedInputs.additional_responsibilities.length > 0) {
+      const extra = normalizedInputs.additional_responsibilities
+        .filter((a) => a.name.trim() || a.role.trim() || a.responsibilities.trim())
+        .map((a) => ({
+          role: a.role.trim() || "—",
+          party: a.name.trim() || "—",
+          responsibilities: a.responsibilities
+            .split(/\r?\n/)
+            .map((s) => s.trim())
+            .filter(Boolean),
         }));
-      }
-      // Additional people: stored inside responsibilities with __additional: true (no separate column)
-      const additional = (inputs as any).additional_responsibilities ?? savedResp.filter((r: any) => r?.__additional);
-      if (Array.isArray(additional) && additional.length > 0) {
-        const extra = additional
-          .filter((a: any) => (a?.name ?? "").toString().trim() || (a?.role ?? "").toString().trim() || (a?.responsibilities ?? "").toString().trim())
-          .map((a: any) => ({
-            role: String(a?.role ?? "").trim() || "—",
-            party: String(a?.name ?? "").trim() || "—",
-            responsibilities: typeof a?.responsibilities === "string"
-              ? a.responsibilities.split(/\r?\n/).map((s: string) => s.trim()).filter(Boolean)
-              : Array.isArray(a?.responsibilities)
-                ? (a.responsibilities as any[]).map((x: any) => String(x ?? "").trim()).filter(Boolean)
-                : ["—"],
-          }));
+      if (extra.length) {
         swmp.responsibilities = [...(swmp.responsibilities ?? []), ...extra];
       }
     }
+    // Overlay site controls so report reflects user-edited inputs (mock and real path)
+    swmp.on_site_controls = buildOnSiteControlsFromInputs(normalizedInputs.site_controls);
 
     // 5) Render HTML for viewing/export (deterministic renderer uses swmp.branding/footer_text)
     const html = renderSwmpHtml(swmp);

@@ -60,7 +60,6 @@ type ProjectRow = {
   swmp_owner: string | null;
 };
 
-const SORTING_LEVELS = ["Basic", "Moderate", "High"] as const;
 
 /** Sorting level → default target diversion. Only applied when target is 0 or user clicks "Apply template defaults". */
 const SORTING_LEVEL_TARGET: Record<(typeof SORTING_LEVELS)[number], number> = {
@@ -86,6 +85,18 @@ const WASTE_STREAM_LIBRARY = [
   "Carpet / carpet tiles",
   "Insulation",
   "Soil / spoil (cleanfill if verified)",
+  "Asphalt / roading material",
+  "Concrete (reinforced)",
+  "Concrete (unreinforced)",
+  "Masonry / bricks",
+  "Roofing materials",
+  "Green waste / vegetation",
+  "Hazardous waste (general)",
+  "Contaminated soil",
+  "Cleanfill soil",
+  "Packaging (mixed)",
+  "PVC pipes / services",
+  "HDPE pipes / services",
 ] as const;
 
 const WASTE_STREAM_SET = new Set<string>(WASTE_STREAM_LIBRARY);
@@ -144,20 +155,34 @@ function getWasteStreamsForProjectType(projectType: string): string[] {
   return ["Mixed C&D"];
 }
 
-type WasteStreamPlan = {
-  category: string;
-  sub_material?: string | null;
-  outcomes: Outcome[];
-  partner?: string | null;
-  partner_overridden?: boolean;
-  pathway: string;
-  notes?: string | null;
-  estimated_qty?: number | null;
-  unit?: "kg" | "t" | "m3" | "skip" | "load" | null;
-};
+/** Build default plan for a stream when applying project type template (quantity left empty). */
+function buildDefaultPlanForStream(stream: string): WasteStreamPlanInput {
+  const defaultUnit = getDefaultUnitForStreamLabel(stream);
+  const defaultThickness = getDefaultThicknessForStreamLabel(stream);
+  return {
+    category: stream,
+    sub_material: null,
+    intended_outcomes: getDefaultIntendedOutcomesForStream(stream),
+    partner_id: null,
+    facility_id: null,
+    destination_override: null,
+    partner: null,
+    partner_overridden: false,
+    pathway: `Segregate ${stream} where practical and send to an approved recycler/processor.`,
+    notes: null,
+    estimated_qty: null,
+    unit: defaultUnit,
+    density_kg_m3: null,
+    thickness_m: defaultThickness ?? null,
+    generated_by: null,
+    on_site_management: null,
+    destination: null,
+    distance_km: null,
+  };
+}
 
-const OUTCOME_OPTIONS = ["Reuse", "Recycle", "Cleanfill", "Landfill"] as const;
-type Outcome = (typeof OUTCOME_OPTIONS)[number];
+/** Alias for UI; plan shape is WasteStreamPlanInput from model. */
+type WasteStreamPlan = WasteStreamPlanInput;
 
 const MONITORING_METHOD_OPTIONS = [
   "Dockets",
@@ -167,17 +192,7 @@ const MONITORING_METHOD_OPTIONS = [
   "Toolbox talks",
 ] as const;
 
-type ResponsibilityRow = { role: string; party: string; responsibilities: string[] };
-
-type AdditionalResponsibility = {
-  name: string;
-  role: string;
-  email?: string;
-  phone?: string;
-  responsibilities: string;
-};
-
-const DEFAULT_RESPONSIBILITIES: ResponsibilityRow[] = [
+const DEFAULT_RESPONSIBILITIES: ResponsibilityInput[] = [
   { role: "SWMP Owner", party: "SWMP Owner", responsibilities: ["Maintain SWMP", "Coordinate waste streams and reporting", "Drive improvements"] },
   { role: "Main Contractor / Site Manager", party: "Main Contractor", responsibilities: ["Ensure segregation is followed", "Manage contamination", "Coordinate contractor"] },
   { role: "All trades", party: "Subcontractors", responsibilities: ["Follow segregation rules", "Keep areas tidy", "Report issues promptly"] },
@@ -203,6 +218,37 @@ const CONSTRAINTS = [
 ] as const;
 
 import { PROJECT_TYPE_GROUPS, PROJECT_TYPE_OPTIONS } from "@/lib/projectTypeOptions";
+import {
+  defaultSwmpInputs,
+  normalizeSwmpInputs,
+  validateSwmpInputs,
+  SWMP_INPUTS_JSON_COLUMN,
+} from "@/lib/swmp/schema";
+import {
+  getDefaultUnitForStream,
+  getDefaultIntendedOutcomesForStream,
+  PLAN_UNIT_OPTIONS,
+  INTENDED_OUTCOME_OPTIONS,
+  SORTING_LEVELS,
+  DEFAULT_DOCKETS_DESCRIPTION,
+  DEFAULT_SITE_CONTROLS,
+  type WasteStreamPlanInput,
+  type ResponsibilityInput,
+  type AdditionalResponsibilityInput,
+  type SiteControlsInput,
+  type PlanUnit,
+} from "@/lib/swmp/model";
+import {
+  getDefaultUnitForStreamLabel,
+  getDefaultThicknessForStreamLabel,
+  getDensityForStreamLabel,
+  computeDiversion,
+} from "@/lib/wasteStreamDefaults";
+import { getPartners, getPartnerById } from "@/lib/partners/getPartners";
+import {
+  getFacilitiesByPartnerAndStream,
+  getFacilityById,
+} from "@/lib/facilities/getFacilities";
 
 export default function ProjectInputsPage() {
   const router = useRouter();
@@ -256,9 +302,8 @@ export default function ProjectInputsPage() {
   const [monitoringMethods, setMonitoringMethods] = useState<string[]>(["Dockets"]);
   const [usesSoftware, setUsesSoftware] = useState(false);
   const [softwareName, setSoftwareName] = useState("");
-  const DEFAULT_DOCKETS_DESCRIPTION =
-    "All waste movements will be supported by weighbridge dockets and/or disposal receipts/invoices. These records will be retained as evidence of disposal pathway and used for SWMP reporting and diversion tracking.";
   const [docketsDescription, setDocketsDescription] = useState(DEFAULT_DOCKETS_DESCRIPTION);
+  const [siteControls, setSiteControls] = useState<SiteControlsInput>({ ...DEFAULT_SITE_CONTROLS });
 
   const [projectSaveMsg, setProjectSaveMsg] = useState<string | null>(null);
   const [projectSaveErr, setProjectSaveErr] = useState<string | null>(null);
@@ -296,13 +341,22 @@ export default function ProjectInputsPage() {
         return {
           category: stream,
           sub_material: null,
-          outcomes: ["Recycle"] as Outcome[],
+          intended_outcomes: ["Recycle"],
+          partner_id: null,
+          facility_id: null,
+          destination_override: null,
           partner: null,
           partner_overridden: false,
           pathway: `Segregate ${stream} where practical and send to an approved recycler/processor.`,
           notes: null,
           estimated_qty: null,
-          unit: null,
+          unit: getDefaultUnitForStreamLabel(stream),
+          density_kg_m3: null,
+          thickness_m: getDefaultThicknessForStreamLabel(stream) ?? null,
+          generated_by: null,
+          on_site_management: null,
+          destination: null,
+          distance_km: null,
         };
       });
 
@@ -320,6 +374,7 @@ export default function ProjectInputsPage() {
 
   // Default selection for new/empty projects: ensure Mixed C&D is selected on first load.
   const didInitDefaultStreamsRef = useRef(false);
+  const lastHydratedProjectIdRef = useRef<string | null>(null);
   useEffect(() => {
     if (didInitDefaultStreamsRef.current) return;
     if (loading) return;
@@ -338,7 +393,7 @@ export default function ProjectInputsPage() {
     if (next.length > 0) setSelectedWasteStreams(next);
   }, [effectiveProjectType, selectedWasteStreams.length]);
 
-  // Auto-populate partner from waste contractor unless user overrides per plan.
+  // Auto-populate custom destination from waste contractor when partner is Other and not overridden.
   useEffect(() => {
     const contractor = wasteContractor.trim() || null;
 
@@ -347,14 +402,12 @@ export default function ProjectInputsPage() {
       const next = prev.map((p) => {
         const overridden = !!p.partner_overridden;
         if (overridden) return p;
+        if (p.partner_id != null && p.partner_id !== "") return p;
 
-        const nextPartner = contractor;
-        if ((p.partner ?? null) === nextPartner) return p;
-
+        if ((p.destination_override ?? p.partner ?? null) === contractor) return p;
         changed = true;
-        return { ...p, partner: nextPartner };
+        return { ...p, destination_override: contractor, partner: contractor };
       });
-
       return changed ? next : prev;
     });
   }, [wasteContractor]);
@@ -391,8 +444,8 @@ export default function ProjectInputsPage() {
 
   const [notes, setNotes] = useState("");
 
-  const [responsibilities, setResponsibilities] = useState<ResponsibilityRow[]>(DEFAULT_RESPONSIBILITIES);
-  const [additionalResponsibilities, setAdditionalResponsibilities] = useState<AdditionalResponsibility[]>([]);
+  const [responsibilities, setResponsibilities] = useState<ResponsibilityInput[]>(DEFAULT_RESPONSIBILITIES);
+  const [additionalResponsibilities, setAdditionalResponsibilities] = useState<AdditionalResponsibilityInput[]>([]);
 
   const [saveLoading, setSaveLoading] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
@@ -465,141 +518,69 @@ export default function ProjectInputsPage() {
       if (savedInputsErr) console.warn(savedInputsErr);
   
       if (!savedInputsErr && savedInputs) {
-        // 🔁 Hydrate form state from DB (normalize "Medium" → "Moderate" for sorting level)
-        const rawLevel = savedInputs.sorting_level ?? "Moderate";
-        setSortingLevel((rawLevel === "Medium" ? "Moderate" : rawLevel) as (typeof SORTING_LEVELS)[number]);
-        setTargetDiversion(savedInputs.target_diversion ?? 70);
-        setSelectedConstraints(savedInputs.constraints ?? []);
-        setSelectedWasteStreams(savedInputs.waste_streams ?? []);
-  
-        setHazAsbestos(!!savedInputs.hazards?.asbestos);
-        setHazLeadPaint(!!savedInputs.hazards?.lead_paint);
-        setHazContaminatedSoil(!!savedInputs.hazards?.contaminated_soil);
-  
-        setWasteContractor(savedInputs.logistics?.waste_contractor ?? "");
-        setBinPreference(savedInputs.logistics?.bin_preference ?? "Recommend");
-        setReportingCadence(savedInputs.logistics?.reporting_cadence ?? "Weekly");
-        setMonitoringMethods(savedInputs.monitoring?.methods ?? ["Dockets"]);
-        setUsesSoftware(!!savedInputs.monitoring?.uses_software);
-        setSoftwareName(savedInputs.monitoring?.software_name ?? "");
-        setDocketsDescription(savedInputs.monitoring?.dockets_description ?? DEFAULT_DOCKETS_DESCRIPTION);
-
-  
-        const rawPlans = Array.isArray(savedInputs.waste_stream_plans)
-          ? savedInputs.waste_stream_plans
-          : [];
-
-        // Migrate legacy `{ outcome: "Dispose" }` to `{ outcomes: ["Landfill"] }` etc in-memory.
-        const migratedPlans = rawPlans.map((p: any) => {
-          const rawOutcomes = Array.isArray(p?.outcomes)
-            ? p.outcomes
-            : typeof p?.outcome === "string"
-              ? [p.outcome]
-              : ["Recycle"];
-
-          const allowed = new Set(OUTCOME_OPTIONS as readonly string[]);
-          const normalizeOutcome = (x: string) => {
-            const v = x.trim();
-            if (v === "Dispose") return "Landfill";
-            if (v === "Recover") return "Recycle";
-            if (v === "Clean fill") return "Cleanfill";
-            return v;
-          };
-
-          const safeOutcomes = (rawOutcomes as any[])
-            .map((x) => normalizeOutcome(String(x)))
-            .filter((x) => allowed.has(x)) as Outcome[];
-
-          const outcomes: Outcome[] = safeOutcomes.length > 0 ? safeOutcomes : ["Recycle"];
-
-          return {
-            category: String(p?.category ?? ""),
-            sub_material: p?.sub_material ?? null,
-            outcomes,
-            partner: p?.partner ?? null,
-            partner_overridden: !!p?.partner_overridden,
-            pathway: String(
-              p?.pathway ??
-                `Segregate ${String(p?.category ?? "this stream")} where practical and send to an approved recycler/processor.`
-            ),
-            notes: p?.notes ?? null,
-            estimated_qty: p?.estimated_qty ?? null,
-            unit: p?.unit ?? null,
-          } satisfies WasteStreamPlan;
-        });
-
-        setStreamPlans(migratedPlans);
-
-        setNotes(savedInputs.notes ?? "");
-
-        const rawResp = (savedInputs as any).responsibilities;
-        const defaultRespWithParty = DEFAULT_RESPONSIBILITIES.map((d, i) => ({
-          ...d,
-          party: i === 0 ? (project?.swmp_owner ?? d.party) : i === 1 ? (project?.main_contractor ?? d.party) : d.party,
-        }));
-        if (Array.isArray(rawResp)) {
-          const main = rawResp.filter((r: any) => !r?.__additional);
-          const additionalFromResp = rawResp.filter((r: any) => r?.__additional).map((a: any) => ({
-            name: String(a?.name ?? "").trim(),
-            role: String(a?.role ?? "").trim(),
-            email: a?.email != null ? String(a.email).trim() : undefined,
-            phone: a?.phone != null ? String(a.phone).trim() : undefined,
-            responsibilities: String(a?.responsibilities ?? "").trim(),
-          }));
-          if (main.length >= 3) {
-            setResponsibilities(
-              main.slice(0, 3).map((r: any) => ({
-                role: String(r?.role ?? "").trim() || "Role",
-                party: String(r?.party ?? "").trim() || "—",
-                responsibilities: Array.isArray(r?.responsibilities)
-                  ? r.responsibilities.map((x: any) => String(x ?? "").trim()).filter(Boolean)
-                  : [],
-              }))
-            );
-          } else {
-            setResponsibilities(defaultRespWithParty);
-          }
-          const extra = additionalFromResp.filter((a) => a.name || a.role || a.responsibilities);
-          if (extra.length > 0) {
-            setAdditionalResponsibilities(extra);
-          } else {
-            const legacy = (savedInputs as any).additional_responsibilities;
-            if (Array.isArray(legacy)) {
-              setAdditionalResponsibilities(
-                legacy.map((a: any) => ({
-                  name: String(a?.name ?? "").trim(),
-                  role: String(a?.role ?? "").trim(),
-                  email: a?.email != null ? String(a.email).trim() : undefined,
-                  phone: a?.phone != null ? String(a.phone).trim() : undefined,
-                  responsibilities: String(a?.responsibilities ?? "").trim(),
-                })).filter((a) => a.name || a.role || a.responsibilities)
-              );
-            } else {
-              setAdditionalResponsibilities([]);
-            }
-          }
-        } else {
-          const rawAdditional = (savedInputs as any).additional_responsibilities;
-          if (Array.isArray(rawAdditional)) {
-            setAdditionalResponsibilities(
-              rawAdditional.map((a: any) => ({
-                name: String(a?.name ?? "").trim(),
-                role: String(a?.role ?? "").trim(),
-                email: a?.email != null ? String(a.email).trim() : undefined,
-                phone: a?.phone != null ? String(a.phone).trim() : undefined,
-                responsibilities: String(a?.responsibilities ?? "").trim(),
-              })).filter((a) => a.name || a.role || a.responsibilities)
-            );
-          } else {
-            setAdditionalResponsibilities([]);
-          }
-          setResponsibilities(defaultRespWithParty);
+        if (lastHydratedProjectIdRef.current === projectId) {
+          setLoading(false);
+          return;
         }
-      } else if (project) {
-        setSelectedWasteStreams(getWasteStreamsForProjectType(project.project_type ?? ""));
-        setAdditionalResponsibilities([]);
+        lastHydratedProjectIdRef.current = projectId ?? null;
+        const jsonCol = savedInputs[SWMP_INPUTS_JSON_COLUMN as keyof typeof savedInputs];
+        const raw =
+          jsonCol != null && typeof jsonCol === "object"
+            ? { ...jsonCol, project_id: projectId }
+            : { project_id: projectId };
+        const normalized = normalizeSwmpInputs(raw);
+        setSortingLevel(normalized.sorting_level);
+        setTargetDiversion(normalized.target_diversion);
+        setSelectedConstraints(normalized.constraints);
+        setSelectedWasteStreams(normalized.waste_streams);
+        setStreamPlans(normalized.waste_stream_plans);
+        setHazAsbestos(normalized.hazards.asbestos);
+        setHazLeadPaint(normalized.hazards.lead_paint);
+        setHazContaminatedSoil(normalized.hazards.contaminated_soil);
+        setWasteContractor(normalized.logistics.waste_contractor ?? "");
+        setBinPreference(normalized.logistics.bin_preference);
+        setReportingCadence(normalized.logistics.reporting_cadence);
+        setMonitoringMethods(normalized.monitoring.methods);
+        setUsesSoftware(normalized.monitoring.uses_software);
+        setSoftwareName(normalized.monitoring.software_name ?? "");
+        setDocketsDescription(normalized.monitoring.dockets_description);
+        setSiteControls(normalized.site_controls);
+        setNotes(normalized.notes ?? "");
         setResponsibilities(
-          DEFAULT_RESPONSIBILITIES.map((d, i) => ({
+          normalized.responsibilities.map((r, i) => ({
+            ...r,
+            party:
+              i === 0 ? (project?.swmp_owner ?? r.party) : i === 1 ? (project?.main_contractor ?? r.party) : r.party,
+          }))
+        );
+        setAdditionalResponsibilities(normalized.additional_responsibilities);
+      } else if (project) {
+        if (lastHydratedProjectIdRef.current === projectId) {
+          setLoading(false);
+          return;
+        }
+        lastHydratedProjectIdRef.current = projectId ?? null;
+        const defaults = defaultSwmpInputs(projectId ?? undefined);
+        setSortingLevel(defaults.sorting_level);
+        setTargetDiversion(defaults.target_diversion);
+        setSelectedConstraints(defaults.constraints);
+        setSelectedWasteStreams(getWasteStreamsForProjectType(project.project_type ?? "") || defaults.waste_streams);
+        setStreamPlans(defaults.waste_stream_plans);
+        setHazAsbestos(defaults.hazards.asbestos);
+        setHazLeadPaint(defaults.hazards.lead_paint);
+        setHazContaminatedSoil(defaults.hazards.contaminated_soil);
+        setWasteContractor(defaults.logistics.waste_contractor ?? "");
+        setBinPreference(defaults.logistics.bin_preference);
+        setReportingCadence(defaults.logistics.reporting_cadence);
+        setMonitoringMethods(defaults.monitoring.methods);
+        setUsesSoftware(defaults.monitoring.uses_software);
+        setSoftwareName(defaults.monitoring.software_name ?? "");
+        setDocketsDescription(defaults.monitoring.dockets_description);
+        setSiteControls(defaults.site_controls);
+        setNotes(defaults.notes ?? "");
+        setAdditionalResponsibilities(defaults.additional_responsibilities);
+        setResponsibilities(
+          defaults.responsibilities.map((d, i) => ({
             ...d,
             party: i === 0 ? (project.swmp_owner ?? d.party) : i === 1 ? (project.main_contractor ?? d.party) : d.party,
           }))
@@ -614,7 +595,9 @@ export default function ProjectInputsPage() {
       mounted = false;
     };
   }, [projectId]);
-  
+
+  const updatePlan = (stream: string, patch: Partial<WasteStreamPlan>) =>
+    setStreamPlans((prev) => prev.map((p) => (p.category === stream ? { ...p, ...patch } : p)));
 
   function toggleInList(value: string, list: string[], setList: (v: string[]) => void) {
     if (list.includes(value)) {
@@ -682,10 +665,64 @@ export default function ProjectInputsPage() {
     }
   }
 
+  // Readiness checks (non-blocking warnings) before generating
+  const generationWarnings = useMemo(() => {
+    const list: string[] = [];
+    if (!siteAddress.trim()) list.push("Project: site address is missing.");
+    if (!region.trim()) list.push("Project: region is missing.");
+    if (!effectiveProjectType) list.push("Project: project type is missing.");
+    if (!startDate.trim()) list.push("Project: start date is missing.");
+    if (!clientName.trim()) list.push("Project: client name is missing.");
+    if (!mainContractor.trim()) list.push("Project: main contractor is missing.");
+    if (!swmpOwner.trim()) list.push("Project: SWMP owner is missing.");
+    const planByCategory = new Map(streamPlans.map((p) => [p.category, p]));
+    for (const stream of selectedWasteStreams) {
+      const plan = planByCategory.get(stream);
+      const outcomesSet = (plan?.intended_outcomes?.length ?? 0) > 0;
+      const destinationSet =
+        (plan?.facility_id != null && plan.facility_id !== "") ||
+        ((plan?.destination_override ?? "").trim().length > 0) ||
+        ((plan?.destination ?? "").trim().length > 0);
+      const distanceProvided = plan?.distance_km != null && plan.distance_km >= 0;
+      if (!outcomesSet) list.push(`“${stream}”: intended outcomes not set.`);
+      if (!destinationSet) list.push(`“${stream}”: destination not set (select facility or enter custom).`);
+      if (!distanceProvided) list.push(`“${stream}”: distance (km) not provided (0 is OK).`);
+    }
+    return list;
+  }, [
+    siteAddress,
+    region,
+    effectiveProjectType,
+    startDate,
+    clientName,
+    mainContractor,
+    swmpOwner,
+    selectedWasteStreams,
+    streamPlans,
+  ]);
+
+  const diversionSummary = useMemo(
+    () =>
+      computeDiversion(
+        selectedWasteStreams.map((stream) => {
+          const plan = streamPlans.find((p) => p.category === stream);
+          return {
+            category: stream,
+            estimated_qty: plan?.estimated_qty ?? null,
+            unit: plan?.unit ?? null,
+            density_kg_m3: plan?.density_kg_m3 ?? null,
+            thickness_m: plan?.thickness_m ?? null,
+            intended_outcomes: plan?.intended_outcomes ?? ["Recycle"],
+          };
+        })
+      ),
+    [selectedWasteStreams, streamPlans]
+  );
+
   async function handleGenerate() {
     setSaveError(null);
     setSaveMessage(null);
-  
+
     if (!projectId) {
       setSaveError("Missing project id.");
       return;
@@ -697,7 +734,7 @@ export default function ProjectInputsPage() {
       );
       return;
     }
-  
+
     setIsGenerating(true);
     try {
       const res = await fetch("/api/generate-swmp", {
@@ -746,34 +783,30 @@ export default function ProjectInputsPage() {
     setSaveLoading(true);
 
     try {
-      const payload = {
-        project_id: projectId,
+      const fromState = {
         sorting_level: sortingLevel,
         target_diversion: Math.min(100, Math.max(0, Math.round(Number(targetDiversion)) || 0)),
         constraints: selectedConstraints,
         waste_streams: selectedWasteStreams,
         hazards,
         waste_stream_plans: streamPlans,
-        responsibilities: [
-          ...responsibilities.map((r) => {
-            const list = r.responsibilities.filter(Boolean);
-            return {
-              role: r.role.trim() || "Role",
-              party: r.party.trim() || "—",
-              responsibilities: list.length ? list : ["—"],
-            };
-          }),
-          ...additionalResponsibilities
-            .filter((a) => a.name.trim() || a.role.trim() || a.responsibilities.trim())
-            .map((a) => ({
-              __additional: true as const,
-              name: a.name.trim(),
-              role: a.role.trim(),
-              email: a.email?.trim() || undefined,
-              phone: a.phone?.trim() || undefined,
-              responsibilities: a.responsibilities.trim(),
-            })),
-        ],
+        responsibilities: responsibilities.map((r) => {
+          const list = r.responsibilities.filter(Boolean);
+          return {
+            role: r.role.trim() || "Role",
+            party: r.party.trim() || "—",
+            responsibilities: list.length ? list : ["—"],
+          };
+        }),
+        additional_responsibilities: additionalResponsibilities
+          .filter((a) => a.name.trim() || a.role.trim() || a.responsibilities.trim())
+          .map((a) => ({
+            name: a.name.trim(),
+            role: a.role.trim(),
+            email: a.email?.trim() || undefined,
+            phone: a.phone?.trim() || undefined,
+            responsibilities: a.responsibilities.trim(),
+          })),
         logistics: {
           waste_contractor: wasteContractor.trim() || null,
           bin_preference: binPreference,
@@ -785,10 +818,15 @@ export default function ProjectInputsPage() {
           software_name: softwareName || null,
           dockets_description: docketsDescription,
         },
+        site_controls: siteControls,
         notes: notes.trim() || null,
       };
+      const normalized = normalizeSwmpInputs({ ...fromState, project_id: projectId });
 
-      const { error } = await supabase.from("swmp_inputs").insert(payload);
+      const { error } = await supabase.from("swmp_inputs").insert({
+        project_id: projectId,
+        [SWMP_INPUTS_JSON_COLUMN]: normalized,
+      });
 
       if (error) {
         setSaveError(error.message || "Failed to save inputs.");
@@ -1002,28 +1040,34 @@ export default function ProjectInputsPage() {
           </SubPanel>
         </SectionCard>
 
-        <Accordion type="single" collapsible defaultValue="" className="rounded-xl border bg-card text-card-foreground shadow-sm overflow-hidden">
-          <AccordionItem value="report" className="border-b-0 px-0">
-            <AccordionTrigger className="w-full px-6 py-4 bg-muted/40 hover:bg-muted/60 transition-colors [&[data-state=open]]:bg-muted/60 rounded-t-xl data-[state=open]:rounded-b-none">
+        <Accordion type="single" collapsible defaultValue="" className="w-full max-w-full overflow-hidden">
+          <AccordionItem value="report" className="border rounded-lg px-0 mb-2 overflow-hidden">
+            <AccordionTrigger className="flex w-full items-center justify-between rounded-lg border bg-muted/40 px-4 py-3 hover:bg-muted/60 transition-colors [&>svg]:shrink-0">
               <span className="flex flex-col items-start text-left gap-0.5">
-                <span className="font-semibold text-lg">Report Customisation</span>
-                <span className="text-sm font-normal text-muted-foreground">
-                  Report: {[reportTitle.trim() && "title set", clientLogoUrl && "logo set"].filter(Boolean).join(" / ") || "not configured"}
+                <span className="text-base font-bold">Report Customisation</span>
+                <span className="text-sm text-muted-foreground">
+                  Report: {[reportTitle?.trim() && "title set", clientLogoUrl && "logo set"].filter(Boolean).join(" / ") || "not configured"}
                 </span>
               </span>
             </AccordionTrigger>
             <AccordionContent>
-          <div className="px-6 pb-6">
-            {saveProjectError ? (
-              <Notice type="error" title="Error" message={saveProjectError} className="mb-4" />
-            ) : null}
-            {saveProjectMsg ? (
-              <Notice type="success" title="Success" message={saveProjectMsg} className="mb-4" />
-            ) : null}
-            <SubPanel className="bg-muted/30 space-y-4">
-          <div className="grid gap-4">
+              <div className="mt-2 rounded-lg border bg-background p-4 w-full max-w-full overflow-hidden space-y-4">
+      {saveProjectError ? (
+        <Notice type="error" title="Error" message={saveProjectError} className="mb-4" />
+      ) : null}
+      {saveProjectMsg ? (
+        <Notice type="success" title="Success" message={saveProjectMsg} className="mb-4" />
+      ) : null}
+
+              {saveProjectError ? (
+                <Notice type="error" title="Error" message={saveProjectError} className="mb-4" />
+              ) : null}
+              {saveProjectMsg ? (
+                <Notice type="success" title="Success" message={saveProjectMsg} className="mb-4" />
+              ) : null}
+              <div className="space-y-4">
             <div className="grid gap-2">
-              <Label>Client name</Label>
+              <Label className="font-semibold">Client name</Label>
               <Input
                 value={projectClientName}
                 onChange={(e) => setProjectClientName(e.target.value)}
@@ -1031,16 +1075,16 @@ export default function ProjectInputsPage() {
             </div>
 
             <div className="grid gap-3">
-              <Label>Client logo (optional)</Label>
+              <Label className="font-semibold">Client logo (optional)</Label>
 
               {clientLogoUrl ? (
-                <div className="w-full rounded-lg border p-3 overflow-hidden">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="shrink-0 h-16 w-16 rounded-md border bg-white flex items-center justify-center overflow-hidden">
+                <div className="w-full max-w-full rounded-lg border p-3 overflow-hidden">
+                  <div className="flex items-center gap-3 min-w-0 max-w-full">
+                    <div className="shrink-0 h-16 w-16 rounded-md border bg-white flex items-center justify-center overflow-hidden max-w-full">
                       <img
                         src={clientLogoUrl}
                         alt="Client logo"
-                        className="h-full w-full object-contain"
+                        className="h-full w-full max-w-full object-contain"
                       />
                     </div>
                     <div className="min-w-0 flex-1">
@@ -1142,7 +1186,7 @@ export default function ProjectInputsPage() {
             </div>
 
             <div className="grid gap-2">
-              <Label>Report title (optional)</Label>
+              <Label className="font-semibold">Report title (optional)</Label>
               <Input
                 value={reportTitle}
                 onChange={(e) => setReportTitle(e.target.value)}
@@ -1151,7 +1195,7 @@ export default function ProjectInputsPage() {
             </div>
 
             <div className="grid gap-2">
-              <Label>Footer / disclaimer override (optional)</Label>
+              <Label className="font-semibold">Footer / disclaimer override (optional)</Label>
               <Textarea
                 value={reportFooter}
                 onChange={(e) => setReportFooter(e.target.value)}
@@ -1159,12 +1203,12 @@ export default function ProjectInputsPage() {
               />
             </div>
 
-            <SubPanel className="mt-4 shadow-sm">
+            <div className="pt-2">
               <Button
                 type="button"
                 variant="primary"
                 size="default"
-                className="w-full"
+                className="w-full max-w-full"
                 onClick={async () => {
                   setSaveProjectMsg(null);
                   setSaveProjectError(null);
@@ -1193,9 +1237,8 @@ export default function ProjectInputsPage() {
               >
                 Save report settings
               </Button>
-            </SubPanel>
+            </div>
           </div>
-          </SubPanel>
           </div>
             </AccordionContent>
           </AccordionItem>
@@ -1314,9 +1357,14 @@ export default function ProjectInputsPage() {
                     variant="outline"
                     size="default"
                     disabled={saveLoading}
-                    onClick={() =>
-                      setSelectedWasteStreams(getWasteStreamsForProjectType(effectiveProjectType))
-                    }
+                    onClick={() => {
+                      const templateStreams =
+                        getWasteStreamsForProjectType(effectiveProjectType);
+                      setSelectedWasteStreams(templateStreams);
+                      setStreamPlans(
+                        templateStreams.map((stream) => buildDefaultPlanForStream(stream))
+                      );
+                    }}
                     className="transition-colors hover:bg-muted/80"
                   >
                     Apply template
@@ -1398,6 +1446,37 @@ export default function ProjectInputsPage() {
               </div>
             </div>
 
+            <div className="mt-6 rounded-lg border bg-muted/30 p-4 space-y-3">
+              <Label className="font-semibold block">Diversion summary</Label>
+              <p className="text-sm text-muted-foreground">
+                Based on estimated quantities and intended outcomes. Add quantities and units in waste stream plans to see metrics.
+              </p>
+              <div className="grid gap-2 sm:grid-cols-3 text-sm">
+                <div>
+                  <span className="font-medium text-muted-foreground">Diversion (Reuse+Recycle) %</span>
+                  <p className="text-base font-semibold">{diversionSummary.totalTonnes > 0 ? diversionSummary.diversionReuseRecyclePct.toFixed(1) : "—"}%</p>
+                </div>
+                <div>
+                  <span className="font-medium text-muted-foreground">Landfill avoidance (incl. Cleanfill) %</span>
+                  <p className="text-base font-semibold">{diversionSummary.totalTonnes > 0 ? diversionSummary.landfillAvoidancePct.toFixed(1) : "—"}%</p>
+                </div>
+                <div>
+                  <span className="font-medium text-muted-foreground">Total estimated tonnes</span>
+                  <p className="text-base font-semibold">{diversionSummary.totalTonnes > 0 ? diversionSummary.totalTonnes.toFixed(2) : "—"}</p>
+                </div>
+              </div>
+              {(diversionSummary.missingThicknessStreams.length > 0 || diversionSummary.missingQuantityStreams.length > 0) && (
+                <p className="text-xs text-muted-foreground">
+                  {diversionSummary.missingThicknessStreams.length > 0 && (
+                    <>Streams with m² but no thickness: {diversionSummary.missingThicknessStreams.join(", ")}. </>
+                  )}
+                  {diversionSummary.missingQuantityStreams.length > 0 && (
+                    <>Streams without quantity: {diversionSummary.missingQuantityStreams.join(", ")}.</>
+                  )}
+                </p>
+              )}
+            </div>
+
             <div className="mt-6">
               <Label className="mb-3 block font-semibold">Waste stream plans (detailed)</Label>
               <p className="text-sm text-muted-foreground mb-4">
@@ -1430,7 +1509,10 @@ export default function ProjectInputsPage() {
                       setStreamPlans((prev) =>
                         prev.map((p) => ({
                           ...p,
-                          outcomes: (src.outcomes.length ? src.outcomes : ["Recycle"]) as Outcome[],
+                          intended_outcomes:
+                            src.intended_outcomes?.length > 0
+                              ? [...src.intended_outcomes]
+                              : ["Recycle"],
                         }))
                       );
                     }}
@@ -1461,6 +1543,9 @@ export default function ProjectInputsPage() {
                       setStreamPlans((prev) =>
                         prev.map((p) => ({
                           ...p,
+                          partner_id: src.partner_id ?? null,
+                          facility_id: src.facility_id ?? null,
+                          destination_override: src.destination_override ?? null,
                           partner: src.partner ?? null,
                           partner_overridden: true,
                         }))
@@ -1494,20 +1579,45 @@ export default function ProjectInputsPage() {
                       ({
                         category: stream,
                         sub_material: null,
-                        outcomes: ["Recycle"],
-                        partner: wasteContractor.trim() || null,
+                        intended_outcomes: ["Recycle"],
+                        partner_id: null,
+                        facility_id: null,
+                        destination_override: null,
+                        partner: null,
                         partner_overridden: false,
                         pathway: `Segregate ${stream} where practical and send to an approved recycler/processor.`,
                         notes: null,
                         estimated_qty: null,
-                        unit: null,
+                        unit: getDefaultUnitForStreamLabel(stream),
+                        density_kg_m3: null,
+                        thickness_m: getDefaultThicknessForStreamLabel(stream) ?? null,
+                        generated_by: null,
+                        on_site_management: null,
+                        destination: null,
+                        distance_km: null,
                       } as WasteStreamPlan);
 
                     const expanded = expandedStreamPlans[stream] ?? false;
+                    const resolvedPartner = getPartnerById(safePlan.partner_id);
+                    const resolvedFacility = getFacilityById(safePlan.facility_id);
                     const summaryPartner =
-                      (safePlan.partner ?? null) ?? (wasteContractor.trim() || "—");
-                    const summaryOutcomes =
-                      (safePlan.outcomes?.length ? safePlan.outcomes : ["Recycle"]).join(", ");
+                      resolvedPartner?.name ??
+                      (safePlan.destination_override ?? safePlan.partner ?? (wasteContractor.trim() || "—"));
+                    const summaryOutcomes = (
+                      safePlan.intended_outcomes?.length
+                        ? safePlan.intended_outcomes
+                        : ["Recycle"]
+                    ).join(", ");
+                    const summaryQtyUnit =
+                      safePlan.estimated_qty != null && safePlan.estimated_qty >= 0
+                        ? `${safePlan.estimated_qty} ${safePlan.unit ?? getDefaultUnitForStreamLabel(stream)}`
+                        : "";
+                    const summaryDest =
+                      resolvedFacility?.name ??
+                      (safePlan.destination_override ?? (safePlan.destination ?? "").trim()) ??
+                      "";
+                    const summaryDestTruncated =
+                      summaryDest.length > 40 ? `${summaryDest.slice(0, 37)}…` : summaryDest;
 
                     return (
                       <div
@@ -1534,11 +1644,15 @@ export default function ProjectInputsPage() {
                           }}
                           className="w-full text-left flex items-center justify-between gap-2 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-md"
                         >
-                          <div className="flex-1">
+                          <div className="flex-1 min-w-0">
                             <div className="font-semibold">
                               {stream}{" "}
                               <span className="text-muted-foreground font-normal">
-                                — {summaryOutcomes} — {summaryPartner}
+                                {summaryQtyUnit ? `— ${summaryQtyUnit} — ` : ""}
+                                {summaryOutcomes}
+                                {summaryDestTruncated ? ` — ${summaryDestTruncated}` : ""}
+                                {" — "}
+                                {summaryPartner}
                               </span>
                             </div>
                             <div className="text-xs text-muted-foreground">
@@ -1588,10 +1702,14 @@ export default function ProjectInputsPage() {
                               </div>
 
                               <div className="grid gap-2">
-                                <Label>Intended outcomes (select one or more)</Label>
-                                <div className="grid gap-2 sm:grid-cols-2">
-                                  {OUTCOME_OPTIONS.map((o) => {
-                                    const checked = (safePlan.outcomes ?? ["Recycle"]).includes(o);
+                                <Label>Intended outcomes (multi-select)</Label>
+                                <div className="grid gap-2 grid-cols-2 sm:grid-cols-3">
+                                  {INTENDED_OUTCOME_OPTIONS.map((o) => {
+                                    const current =
+                                      safePlan.intended_outcomes?.length > 0
+                                        ? safePlan.intended_outcomes
+                                        : ["Recycle"];
+                                    const checked = current.includes(o);
                                     return (
                                       <div key={o} className="flex items-center gap-2">
                                         <Checkbox
@@ -1600,20 +1718,19 @@ export default function ProjectInputsPage() {
                                             setStreamPlans((prev) =>
                                               prev.map((p) => {
                                                 if (p.category !== stream) return p;
-                                                const current =
-                                                  Array.isArray(p.outcomes) && p.outcomes.length > 0
-                                                    ? p.outcomes
-                                                    : (["Recycle"] as Outcome[]);
-                                                const has = current.includes(o);
+                                                const cur =
+                                                  Array.isArray(p.intended_outcomes) &&
+                                                  p.intended_outcomes.length > 0
+                                                    ? p.intended_outcomes
+                                                    : ["Recycle"];
+                                                const has = cur.includes(o);
                                                 const next = has
-                                                  ? current.filter((x) => x !== o)
-                                                  : [...current, o];
+                                                  ? cur.filter((x) => x !== o)
+                                                  : [...cur, o];
                                                 return {
                                                   ...p,
-                                                  outcomes:
-                                                    next.length > 0
-                                                      ? (next as Outcome[])
-                                                      : (["Recycle"] as Outcome[]),
+                                                  intended_outcomes:
+                                                    next.length > 0 ? next : ["Recycle"],
                                                 };
                                               })
                                             );
@@ -1629,72 +1746,71 @@ export default function ProjectInputsPage() {
                             </div>
 
                             <div className="grid gap-2">
-                              <Label>Partner / processor (optional)</Label>
-                              <div className="flex gap-2">
-                                <Input
-                                  value={safePlan.partner ?? ""}
-                                  onChange={(e) => {
-                                    const v = e.target.value;
-                                    const trimmed = v.trim();
-                                    const contractor = wasteContractor.trim();
-
-                                    setStreamPlans((prev) =>
-                                      prev.map((p) => {
-                                        if (p.category !== stream) return p;
-
-                                        // Clearing partner removes override and re-applies contractor
-                                        if (!trimmed) {
-                                          return {
-                                            ...p,
-                                            partner: contractor || null,
-                                            partner_overridden: false,
-                                          };
-                                        }
-
-                                        return {
-                                          ...p,
-                                          partner: v,
-                                          partner_overridden: contractor
-                                            ? trimmed !== contractor
-                                            : true,
-                                        };
-                                      })
-                                    );
-                                  }}
-                                  placeholder={
-                                    wasteContractor
-                                      ? "Defaults to waste contractor"
-                                      : "e.g. Approved recycler"
-                                  }
-                                  disabled={saveLoading}
-                                  className="flex-1"
-                                />
-
-                                {!!safePlan.partner_overridden && wasteContractor.trim() && (
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => {
-                                      const contractor = wasteContractor.trim();
-                                      setStreamPlans((prev) =>
-                                        prev.map((p) =>
-                                          p.category === stream
-                                            ? {
-                                                ...p,
-                                                partner: contractor || null,
-                                                partner_overridden: false,
-                                              }
-                                            : p
-                                        )
-                                      );
-                                    }}
-                                  >
-                                    Use contractor
-                                  </Button>
-                                )}
-                              </div>
+                              <Label>Partner (company)</Label>
+                              <Select
+                                value={safePlan.partner_id ?? "other"}
+                                onValueChange={(v) => {
+                                  const partnerId = v === "other" || v === "" ? null : v;
+                                  updatePlan(stream, {
+                                    partner_id: partnerId,
+                                    facility_id: null,
+                                    partner: partnerId ? getPartnerById(partnerId)?.name ?? null : null,
+                                    partner_overridden: true,
+                                  });
+                                }}
+                                disabled={saveLoading}
+                              >
+                                <SelectTrigger className="w-full bg-background">
+                                  <SelectValue placeholder="Select partner" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="other">Other</SelectItem>
+                                  {getPartners().map((pr) => (
+                                    <SelectItem key={pr.id} value={pr.id}>
+                                      {pr.name}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
                             </div>
+
+                            {safePlan.partner_id != null && safePlan.partner_id !== "" && (
+                              <div className="grid gap-2">
+                                <Label>Facility (site)</Label>
+                                <Select
+                                  value={safePlan.facility_id ?? "none"}
+                                  onValueChange={(v) => {
+                                    const facilityId = v === "none" || v === "" ? null : v;
+                                    updatePlan(stream, { facility_id: facilityId });
+                                  }}
+                                  disabled={saveLoading}
+                                >
+                                  <SelectTrigger className="w-full bg-background">
+                                    <SelectValue placeholder="Select facility" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="none">— Not selected —</SelectItem>
+                                    {getFacilitiesByPartnerAndStream(safePlan.partner_id, region.trim(), stream).map((f) => (
+                                      <SelectItem key={f.id} value={f.id}>
+                                        {f.name}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            )}
+
+                            {(safePlan.partner_id == null || safePlan.partner_id === "" || safePlan.facility_id == null || safePlan.facility_id === "") && (
+                              <div className="grid gap-2">
+                                <Label>Custom destination</Label>
+                                <Input
+                                  value={safePlan.destination_override ?? ""}
+                                  onChange={(e) => updatePlan(stream, { destination_override: e.target.value || null })}
+                                  placeholder="e.g. Approved recycler / landfill"
+                                  disabled={saveLoading}
+                                />
+                              </div>
+                            )}
 
                             <div className="grid gap-2">
                               <Label>Planned pathway / planned actions</Label>
@@ -1714,11 +1830,35 @@ export default function ProjectInputsPage() {
                               />
                             </div>
 
+                            <div className="grid gap-2">
+                              <Label>How is this waste generated?</Label>
+                              <Textarea
+                                value={safePlan.generated_by ?? ""}
+                                onChange={(e) => updatePlan(stream, { generated_by: e.target.value })}
+                                rows={2}
+                                placeholder="e.g. Demolition, offcuts, packaging"
+                                disabled={saveLoading}
+                              />
+                            </div>
+
+                            <div className="grid gap-2">
+                              <Label>On-site management</Label>
+                              <Textarea
+                                value={safePlan.on_site_management ?? ""}
+                                onChange={(e) => updatePlan(stream, { on_site_management: e.target.value })}
+                                rows={2}
+                                placeholder="e.g. Segregation, covered storage"
+                                disabled={saveLoading}
+                              />
+                            </div>
+
                             <div className="grid gap-4 sm:grid-cols-2">
                               <div className="grid gap-2">
                                 <Label>Estimated quantity (optional)</Label>
                                 <Input
                                   type="number"
+                                  min={0}
+                                  step="any"
                                   value={safePlan.estimated_qty ?? ""}
                                   onChange={(e) => {
                                     const v = e.target.value;
@@ -1734,14 +1874,25 @@ export default function ProjectInputsPage() {
                                 />
                               </div>
                               <div className="grid gap-2">
-                                <Label>Unit (optional)</Label>
+                                <Label>Unit</Label>
                                 <Select
-                                  value={safePlan.unit ?? undefined}
+                                  value={
+                                    safePlan.unit != null
+                                      ? safePlan.unit
+                                      : `default:${getDefaultUnitForStreamLabel(stream)}`
+                                  }
                                   onValueChange={(v) => {
                                     setStreamPlans((prev) =>
                                       prev.map((p) =>
                                         p.category === stream
-                                          ? { ...p, unit: (v === "none" ? null : (v || null)) as any }
+                                          ? {
+                                              ...p,
+                                              unit: v.startsWith("default:")
+                                                ? null
+                                                : v === "none"
+                                                  ? null
+                                                  : (v as PlanUnit),
+                                            }
                                           : p
                                       )
                                     );
@@ -1749,18 +1900,121 @@ export default function ProjectInputsPage() {
                                   disabled={saveLoading}
                                 >
                                   <SelectTrigger className="w-full bg-background">
-                                    <SelectValue placeholder="—" />
+                                    <SelectValue
+                                      placeholder={`Default: ${getDefaultUnitForStreamLabel(stream)}`}
+                                    />
                                   </SelectTrigger>
                                   <SelectContent className="z-50 bg-popover border border-border">
-                                    <SelectItem value="none">—</SelectItem>
-                                    <SelectItem value="kg">kg</SelectItem>
-                                    <SelectItem value="t">t</SelectItem>
-                                    <SelectItem value="m3">m3</SelectItem>
-                                    <SelectItem value="skip">skip</SelectItem>
-                                    <SelectItem value="load">load</SelectItem>
+                                    <SelectItem value={`default:${getDefaultUnitForStreamLabel(stream)}`}>
+                                      Default ({getDefaultUnitForStreamLabel(stream) === "m3" ? "m³" : getDefaultUnitForStreamLabel(stream) === "m2" ? "m²" : getDefaultUnitForStreamLabel(stream)})
+                                    </SelectItem>
+                                    {PLAN_UNIT_OPTIONS.filter(
+                                      (u) => u !== getDefaultUnitForStreamLabel(stream)
+                                    ).map((u) => (
+                                      <SelectItem key={u} value={u}>
+                                        {u === "m3" ? "m³" : u === "m2" ? "m²" : u}
+                                      </SelectItem>
+                                    ))}
                                   </SelectContent>
                                 </Select>
                               </div>
+                            </div>
+
+                            <div className="rounded-lg border bg-muted/30 p-3 space-y-3">
+                              <Label className="font-semibold">More options</Label>
+                              <div className="grid gap-2">
+                                <Label className="font-normal">Density (kg/m³)</Label>
+                                <p className="text-xs text-muted-foreground">Used to convert quantity to tonnes for diversion. Default from stream type.</p>
+                                <Input
+                                  type="number"
+                                  min={0}
+                                  step="any"
+                                  value={
+                                    safePlan.density_kg_m3 != null && safePlan.density_kg_m3 >= 0
+                                      ? safePlan.density_kg_m3
+                                      : ""
+                                  }
+                                  placeholder={String(getDensityForStreamLabel(stream))}
+                                  onChange={(e) => {
+                                    const v = e.target.value;
+                                    setStreamPlans((prev) =>
+                                      prev.map((p) =>
+                                        p.category === stream
+                                          ? {
+                                              ...p,
+                                              density_kg_m3: v === "" ? null : (Number(v) >= 0 ? Number(v) : null),
+                                            }
+                                          : p
+                                      )
+                                    );
+                                  }}
+                                  disabled={saveLoading}
+                                />
+                              </div>
+                              {(safePlan.unit ?? getDefaultUnitForStreamLabel(stream)) === "m2" && (
+                                <div className="grid gap-2">
+                                  <Label className="font-normal">Thickness (m)</Label>
+                                  <p className="text-xs text-muted-foreground">Required for area (m²) to tonnes conversion.</p>
+                                  <Input
+                                    type="number"
+                                    min={0}
+                                    step="any"
+                                    value={
+                                      safePlan.thickness_m != null && safePlan.thickness_m >= 0
+                                        ? safePlan.thickness_m
+                                        : ""
+                                    }
+                                    placeholder={String(getDefaultThicknessForStreamLabel(stream) ?? "e.g. 0.01")}
+                                    onChange={(e) => {
+                                      const v = e.target.value;
+                                      setStreamPlans((prev) =>
+                                        prev.map((p) =>
+                                          p.category === stream
+                                            ? {
+                                                ...p,
+                                                thickness_m: v === "" ? null : (Number(v) >= 0 ? Number(v) : null),
+                                              }
+                                            : p
+                                        )
+                                      );
+                                    }}
+                                    disabled={saveLoading}
+                                  />
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="grid gap-2">
+                              <Label>Distance to destination (km)</Label>
+                              <Input
+                                type="number"
+                                min={0}
+                                step="0.1"
+                                value={
+                                  safePlan.distance_km != null && safePlan.distance_km >= 0
+                                    ? safePlan.distance_km
+                                    : ""
+                                }
+                                onChange={(e) => {
+                                  const v = e.target.value;
+                                  const n = v === "" ? null : Number(v);
+                                  setStreamPlans((prev) =>
+                                    prev.map((p) =>
+                                      p.category === stream
+                                        ? {
+                                            ...p,
+                                            distance_km:
+                                              n != null && !Number.isNaN(n) && n >= 0
+                                                ? n
+                                                : null,
+                                          }
+                                        : p
+                                    )
+                                  );
+                                }}
+                                placeholder="0"
+                                disabled={saveLoading}
+                              />
                             </div>
 
                             <div className="grid gap-2">
@@ -1852,9 +2106,9 @@ export default function ProjectInputsPage() {
               </div>
             </div>
 
-            <Accordion type="single" collapsible defaultValue="" className="w-full">
+            <Accordion type="single" collapsible defaultValue="" className="w-full max-w-full overflow-hidden">
               <AccordionItem value="monitoring" className="border rounded-lg px-0 mb-2 overflow-hidden">
-                <AccordionTrigger className="w-full px-4 py-4 bg-muted/40 hover:bg-muted/60 transition-colors [&[data-state=open]]:bg-muted/60 rounded-t-lg data-[state=open]:rounded-b-none">
+                <AccordionTrigger className="w-full px-4 py-4 bg-muted/40 hover:bg-muted/60 transition-colors [&[data-state=open]]:bg-muted/60 rounded-t-lg data-[state=open]:rounded-b-none [&>svg]:shrink-0">
                   <span className="flex flex-col items-start text-left gap-0.5">
                     <span className="font-semibold text-lg">Monitoring & Reporting</span>
                     <span className="text-sm font-normal text-muted-foreground">
@@ -1933,13 +2187,76 @@ export default function ProjectInputsPage() {
                   disabled={saveLoading}
                 />
               </div>
+
             </SubPanel>
             </div>
                 </AccordionContent>
               </AccordionItem>
 
+              <AccordionItem value="site-controls" className="border rounded-lg px-0 mb-2 overflow-hidden">
+                <AccordionTrigger className="w-full px-4 py-4 bg-muted/40 hover:bg-muted/60 transition-colors [&[data-state=open]]:bg-muted/60 rounded-t-lg data-[state=open]:rounded-b-none [&>svg]:shrink-0">
+                  <span className="flex flex-col items-start text-left gap-0.5">
+                    <span className="font-semibold text-lg">Site controls</span>
+                    <span className="text-sm font-normal text-muted-foreground">
+                      Bin setup, signage, contamination &amp; hazardous controls
+                    </span>
+                  </span>
+                </AccordionTrigger>
+                <AccordionContent className="px-4 pb-4">
+                  <div className="rounded-lg border bg-background p-4 w-full max-w-full overflow-hidden space-y-4">
+                    <p className="text-sm text-muted-foreground">
+                      Describe how bins, signage, and contamination/hazard controls will be managed on site. These appear in the generated SWMP.
+                    </p>
+                    <div className="grid gap-2">
+                      <Label className="font-semibold">Bin setup</Label>
+                      <p className="text-xs text-muted-foreground">How bins/skips will be provided and positioned.</p>
+                      <Textarea
+                        value={siteControls.bin_setup}
+                        onChange={(e) => setSiteControls((prev) => ({ ...prev, bin_setup: e.target.value }))}
+                        rows={2}
+                        disabled={saveLoading}
+                        placeholder={DEFAULT_SITE_CONTROLS.bin_setup}
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label className="font-semibold">Signage &amp; storage</Label>
+                      <p className="text-xs text-muted-foreground">Signage at bin locations and secure storage.</p>
+                      <Textarea
+                        value={siteControls.signage_storage}
+                        onChange={(e) => setSiteControls((prev) => ({ ...prev, signage_storage: e.target.value }))}
+                        rows={2}
+                        disabled={saveLoading}
+                        placeholder={DEFAULT_SITE_CONTROLS.signage_storage}
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label className="font-semibold">Contamination controls</Label>
+                      <p className="text-xs text-muted-foreground">Checks and re-sorting to prevent cross-contamination.</p>
+                      <Textarea
+                        value={siteControls.contamination_controls}
+                        onChange={(e) => setSiteControls((prev) => ({ ...prev, contamination_controls: e.target.value }))}
+                        rows={2}
+                        disabled={saveLoading}
+                        placeholder={DEFAULT_SITE_CONTROLS.contamination_controls}
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label className="font-semibold">Hazardous controls</Label>
+                      <p className="text-xs text-muted-foreground">Separation, containment, and removal of hazardous materials.</p>
+                      <Textarea
+                        value={siteControls.hazardous_controls}
+                        onChange={(e) => setSiteControls((prev) => ({ ...prev, hazardous_controls: e.target.value }))}
+                        rows={2}
+                        disabled={saveLoading}
+                        placeholder={DEFAULT_SITE_CONTROLS.hazardous_controls}
+                      />
+                    </div>
+                  </div>
+                </AccordionContent>
+              </AccordionItem>
+
               <AccordionItem value="responsibilities" className="border rounded-lg px-0 mb-2 overflow-hidden">
-                <AccordionTrigger className="w-full px-4 py-4 bg-muted/40 hover:bg-muted/60 transition-colors [&[data-state=open]]:bg-muted/60 rounded-t-lg data-[state=open]:rounded-b-none">
+                <AccordionTrigger className="w-full px-4 py-4 bg-muted/40 hover:bg-muted/60 transition-colors [&[data-state=open]]:bg-muted/60 rounded-t-lg data-[state=open]:rounded-b-none [&>svg]:shrink-0">
                   <span className="flex flex-col items-start text-left gap-0.5">
                     <span className="font-semibold text-lg">Responsibilities</span>
                     <span className="text-sm font-normal text-muted-foreground">
@@ -2112,7 +2429,7 @@ export default function ProjectInputsPage() {
               </AccordionItem>
 
               <AccordionItem value="notes" className="border rounded-lg px-0 mb-2 overflow-hidden">
-                <AccordionTrigger className="w-full px-4 py-4 bg-muted/40 hover:bg-muted/60 transition-colors [&[data-state=open]]:bg-muted/60 rounded-t-lg data-[state=open]:rounded-b-none">
+                <AccordionTrigger className="w-full px-4 py-4 bg-muted/40 hover:bg-muted/60 transition-colors [&[data-state=open]]:bg-muted/60 rounded-t-lg data-[state=open]:rounded-b-none [&>svg]:shrink-0">
                   <span className="flex flex-col items-start text-left gap-0.5">
                     <span className="font-semibold text-lg">Notes / Additional Context</span>
                     <span className="text-sm font-normal text-muted-foreground">
@@ -2157,6 +2474,14 @@ export default function ProjectInputsPage() {
           title="Generate SWMP"
           description="Generate the final Site Waste Management Plan document."
         >
+          {generationWarnings.length > 0 && (
+            <Notice
+              type="info"
+              title="Readiness checks"
+              message={`The following items are missing or incomplete. You can still generate; the report will use placeholders where needed.\n\n${generationWarnings.map((w) => `• ${w}`).join("\n")}`}
+              className="mb-4 [&_[data-slot=alert-description]]:whitespace-pre-line"
+            />
+          )}
           <SubPanel className="shadow-sm border-muted-foreground/15">
             <Button
               type="button"

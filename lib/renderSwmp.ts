@@ -1,4 +1,7 @@
 import type { Swmp } from "./swmpSchema";
+import { computeDiversion, type PlanForDiversion } from "./wasteStreamDefaults";
+import { getPartnerById } from "./partners/getPartners";
+import { getFacilityById } from "./facilities/getFacilities";
 
 function esc(v: unknown) {
   const s = v === null || v === undefined ? "" : String(v);
@@ -50,55 +53,144 @@ export function renderSwmpHtml(swmp: Swmp) {
   const orgName = swmp.branding.org_name ?? "";
   const clientName = swmp.branding.client_name ?? "";
 
-  const wasteStreamsTable = `
-    <table>
+  type PlanRow = {
+    category: string;
+    intended_outcomes?: string[];
+    outcomes?: string[];
+    estimated_qty?: number | null;
+    unit?: string | null;
+    generated_by?: string | null;
+    on_site_management?: string | null;
+    destination?: string | null;
+    destination_override?: string | null;
+    partner_id?: string | null;
+    facility_id?: string | null;
+    distance_km?: number | null;
+    partner?: string | null;
+    pathway?: string;
+  };
+  const plansByCategory = new Map<string, PlanRow>();
+  for (const p of (swmp.waste_stream_plans ?? []) as PlanRow[]) {
+    if (p?.category) plansByCategory.set(p.category, p);
+  }
+  const streams = (swmp.waste_streams ?? []).map((r) => r.stream);
+  const getPlan = (stream: string): PlanRow =>
+    plansByCategory.get(stream) ?? { category: stream };
+
+  const qtyUnit = (p: PlanRow) => {
+    if (p.estimated_qty != null && p.estimated_qty >= 0) {
+      const u = p.unit ?? "t";
+      return `${p.estimated_qty} ${u === "m3" ? "m³" : u === "m2" ? "m²" : u}`;
+    }
+    return "—";
+  };
+  const outcomesStr = (p: PlanRow) =>
+    (p.intended_outcomes ?? p.outcomes ?? []).join(", ") || "—";
+
+  // Facility name + address, or destination_override (custom text when no facility / Other)
+  const destinationDisplay = (p: PlanRow) => {
+    const fac = getFacilityById(p.facility_id);
+    if (fac) return [fac.name, fac.address].filter(Boolean).join(", ") || fac.name;
+    const over = (p.destination_override ?? "").trim();
+    if (over) return over;
+    return (p.destination ?? "").trim() || "—";
+  };
+  const partnerDisplay = (p: PlanRow) => {
+    const pr = getPartnerById(p.partner_id);
+    if (pr) return pr.name;
+    const over = (p.destination_override ?? "").trim();
+    if (over) return over;
+    return (p.partner ?? "").trim() || "—";
+  };
+  const facilityDisplay = (p: PlanRow) => {
+    const fac = getFacilityById(p.facility_id);
+    if (fac) return [fac.name, fac.address].filter(Boolean).join(", ") || fac.name;
+    const over = (p.destination_override ?? "").trim();
+    if (over) return over;
+    return "—";
+  };
+  const derivedPathway = (p: PlanRow) => {
+    const stream = p.category || "this stream";
+    const dest = destinationDisplay(p);
+    const destForPath = dest !== "—" ? dest : "an approved processor";
+    const out = outcomesStr(p);
+    const forWhat = out && out !== "—" ? out.toLowerCase() : "appropriate recovery";
+    return `Segregate ${stream} where practical and send to ${destForPath} for ${forWhat}.`;
+  };
+  const pathwayText = (p: PlanRow) => {
+    const user = (p.pathway ?? "").trim();
+    return user || derivedPathway(p);
+  };
+
+  const plansForDiversion: PlanForDiversion[] = (swmp.waste_stream_plans ?? []).map((p: PlanRow & { density_kg_m3?: number | null; thickness_m?: number | null }) => ({
+    category: p.category,
+    estimated_qty: p.estimated_qty ?? null,
+    unit: p.unit ?? null,
+    density_kg_m3: p.density_kg_m3 ?? null,
+    thickness_m: p.thickness_m ?? null,
+    intended_outcomes: p.intended_outcomes ?? p.outcomes ?? [],
+  }));
+  const diversionResult = computeDiversion(plansForDiversion);
+
+  // A) Summary: Waste Streams Anticipated (qty, outcomes, Partner, Facility)
+  const wasteStreamsAnticipatedTable = `
+    <table class="report-table table-summary">
       <thead>
         <tr>
-          <th>Stream</th>
-          <th>Segregation</th>
-          <th>Container</th>
-          <th>Destination</th>
-          <th>Handling notes</th>
+          <th class="col-w22">Waste stream</th>
+          <th class="col-w14">Est. quantity &amp; unit</th>
+          <th class="col-w22">Intended outcomes</th>
+          <th class="col-w20">Partner</th>
+          <th class="col-w22">Facility</th>
         </tr>
       </thead>
       <tbody>
-        ${swmp.waste_streams
+        ${streams
           .map(
-            (r) => `
+            (stream) => {
+              const p = getPlan(stream);
+              return `
           <tr>
-            <td>${esc(r.stream)}</td>
-            <td>${esc(r.segregation_method)}</td>
-            <td>${esc(r.container)}</td>
-            <td>${esc(r.destination)}</td>
-            <td>${esc(r.handling_notes)}</td>
-          </tr>`
+            <td class="cell-wrap">${esc(stream)}</td>
+            <td class="cell-wrap">${esc(qtyUnit(p))}</td>
+            <td class="cell-wrap">${esc(outcomesStr(p))}</td>
+            <td class="cell-wrap">${esc(partnerDisplay(p))}</td>
+            <td class="cell-wrap">${esc(facilityDisplay(p))}</td>
+          </tr>`;
+            }
           )
           .join("")}
       </tbody>
     </table>`;
 
-  const plansTable = `
-    <table>
+  // B) Detailed: Waste Stream Plans (how generated, on-site, destination, distance, pathway)
+  const plansDetailedTable = `
+    <table class="report-table table-detailed">
       <thead>
         <tr>
-          <th>Category</th>
-          <th>Sub-material</th>
-          <th>Outcomes</th>
-          <th>Partner</th>
-          <th>Planned pathway</th>
+          <th class="col-p16">Waste stream</th>
+          <th class="col-p19">How generated</th>
+          <th class="col-p19">On-site management</th>
+          <th class="col-p19">Destination</th>
+          <th class="col-p10">Distance (km)</th>
+          <th class="col-p17">Planned pathway</th>
         </tr>
       </thead>
       <tbody>
-        ${(swmp.waste_stream_plans ?? [])
+        ${streams
           .map(
-            (p) => `
+            (stream) => {
+              const p = getPlan(stream);
+              return `
           <tr>
-            <td>${esc(p.category)}</td>
-            <td>${esc(p.sub_material ?? "")}</td>
-            <td>${esc((p.outcomes ?? []).join(", "))}</td>
-            <td>${esc(p.partner ?? "")}</td>
-            <td>${esc(p.pathway)}</td>
-          </tr>`
+            <td class="cell-wrap">${esc(stream)}</td>
+            <td class="cell-wrap">${esc(p.generated_by ?? "—")}</td>
+            <td class="cell-wrap">${esc(p.on_site_management ?? "—")}</td>
+            <td class="cell-wrap">${esc(destinationDisplay(p))}</td>
+            <td class="col-num">${p.distance_km != null && p.distance_km >= 0 ? esc(p.distance_km) : "—"}</td>
+            <td class="cell-wrap">${esc(pathwayText(p))}</td>
+          </tr>`;
+            }
           )
           .join("")}
       </tbody>
@@ -126,13 +218,32 @@ export function renderSwmpHtml(swmp: Swmp) {
     .muted { color: #555; font-size: 12px; }
     .pill { display:inline-block; padding: 6px 10px; border-radius: 999px; border: 1px solid #eee; background: #fafafa; font-size: 12px; color: #222; }
     .grid2 { display:grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    th, td { border: 1px solid #eee; padding: 10px; vertical-align: top; text-align: left; }
-    th { background: #fafafa; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; table-layout: fixed; }
+    .report-table th { padding: 10px 12px; border: 1px solid #e5e7eb; text-align: left; font-weight: 700; white-space: nowrap; background: #f8fafc; }
+    .report-table td { padding: 10px 12px; border: 1px solid #e5e7eb; vertical-align: top; word-break: break-word; }
+    th, td { border: 1px solid #e5e7eb; vertical-align: top; text-align: left; overflow-wrap: break-word; word-break: break-word; }
+    th { background: #f8fafc; font-weight: 700; padding: 10px 12px; white-space: nowrap; }
+    td { padding: 10px 12px; }
     table.kv th { width: 34%; color: #111; background: #fcfcfc; }
+    .table-summary { font-size: 12px; }
+    .table-summary th, .table-summary td { padding: 10px 12px; }
+    .table-detailed th, .table-detailed td { padding: 10px 12px; }
+    .cell-wrap { overflow-wrap: break-word; word-break: break-word; }
+    .col-num { text-align: right; white-space: nowrap; }
+    .col-w26 { width: 26%; }
+    .col-w22 { width: 22%; }
+    .col-w20 { width: 20%; }
+    .col-w16 { width: 16%; }
+    .col-w14 { width: 14%; }
+    .col-w28 { width: 28%; }
+    .col-w30 { width: 30%; }
+    .col-p16 { width: 16%; }
+    .col-p19 { width: 19%; }
+    .col-p10 { width: 10%; white-space: nowrap; }
+    .col-p17 { width: 17%; }
     ul { margin: 8px 0 0; padding-left: 18px; }
     .footer { margin-top: 18px; font-size: 12px; color: #555; display:flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
-    @media print { body { background: #fff; } .page { padding: 0; } .card { box-shadow: none; } }
+    @media print { body { background: #fff; } .page { padding: 12px 16px; max-width: 100%; } .card { box-shadow: none; } }
   </style>
 </head>
 <body>
@@ -157,8 +268,12 @@ export function renderSwmpHtml(swmp: Swmp) {
         <div>
           <h2>Project details</h2>
           ${table([
+            { k: "Site address", v: swmp.project.site_address },
+            { k: "Region", v: swmp.project.region },
+            { k: "Project type", v: swmp.project.project_type },
             { k: "Start date", v: swmp.project.start_date ?? "—" },
             { k: "End date", v: swmp.project.end_date ?? "—" },
+            { k: "Client", v: clientName || "—" },
             { k: "Main contractor", v: swmp.project.main_contractor },
             { k: "SWMP owner", v: swmp.project.swmp_owner },
           ])}
@@ -173,27 +288,39 @@ export function renderSwmpHtml(swmp: Swmp) {
       </div>
 
       <h2>Responsibilities</h2>
-      <table>
-        <thead><tr><th>Role</th><th>Party</th><th>Responsibilities</th></tr></thead>
+      <table class="report-table">
+        <thead><tr><th class="cell-wrap">Role</th><th class="cell-wrap">Party</th><th class="cell-wrap">Responsibilities</th></tr></thead>
         <tbody>
           ${swmp.responsibilities
             .map(
               (r) => `
             <tr>
-              <td>${esc(r.role)}</td>
-              <td>${esc(r.party)}</td>
-              <td>${(r.responsibilities ?? []).map((x) => esc(x)).join("<br/>")}</td>
+              <td class="cell-wrap">${esc(r.role)}</td>
+              <td class="cell-wrap">${esc(r.party)}</td>
+              <td class="cell-wrap">${(r.responsibilities ?? []).map((x) => esc(x)).join("<br/>")}</td>
             </tr>`
             )
             .join("")}
         </tbody>
       </table>
 
-      <h2>Waste streams</h2>
-      ${wasteStreamsTable}
+      <h2>Waste Streams Anticipated</h2>
+      ${wasteStreamsAnticipatedTable}
 
-      <h2>Waste stream plans</h2>
-      ${plansTable}
+      <h2>Waste Stream Plans</h2>
+      ${plansDetailedTable}
+
+      <h2>Diversion summary</h2>
+      <div class="cell-wrap" style="font-size: 13px;">
+        <p style="margin-bottom: 10px;">
+          <strong>Diversion (Reuse+Recycle) %:</strong> ${diversionResult.totalTonnes > 0 ? diversionResult.diversionReuseRecyclePct.toFixed(1) : "—"}% &nbsp;|&nbsp;
+          <strong>Landfill avoidance (incl. Cleanfill) %:</strong> ${diversionResult.totalTonnes > 0 ? diversionResult.landfillAvoidancePct.toFixed(1) : "—"}% &nbsp;|&nbsp;
+          <strong>Total estimated tonnes:</strong> ${diversionResult.totalTonnes > 0 ? diversionResult.totalTonnes.toFixed(2) : "—"}
+        </p>
+        <p class="muted" style="font-size: 12px;">
+          Diversion is the share of estimated waste (by tonnes) sent to Reuse or Recycle. Landfill avoidance also counts material sent to Cleanfill. Totals are derived from stream quantities and densities where provided.
+        </p>
+      </div>
 
       <h2>On-site controls</h2>
       <div class="grid2">
@@ -215,29 +342,21 @@ export function renderSwmpHtml(swmp: Swmp) {
         </div>
       </div>
 
-      <h2>Monitoring</h2>
+      <h2>Monitoring &amp; reporting</h2>
       ${table([
-        { k: "Reporting cadence", v: swmp.records_and_evidence.reporting_cadence },
-        { k: "Evidence methods", v: (swmp.monitoring.methods ?? []).join(", ") },
+        { k: "Evidence methods", v: (swmp.monitoring.methods ?? []).join(", ") || "—" },
         { k: "Uses software", v: swmp.monitoring.uses_software ? "Yes" : "No" },
-        { k: "Software name", v: swmp.monitoring.software_name ?? "—" },
+        { k: "Software name", v: (swmp.monitoring.software_name ?? "").trim() || "—" },
+        { k: "Reporting cadence", v: swmp.records_and_evidence.reporting_cadence },
       ])}
-      ${swmp.monitoring.dockets_description ? `<div style="margin-top:10px; font-size:13px;">${esc(swmp.monitoring.dockets_description)}</div>` : ""}
-
-      <h2>Records & evidence</h2>
-      <div class="grid2">
-        <div>
-          <div><strong>Records to keep</strong></div>
-          ${list(swmp.records_and_evidence.record_retention)}
-        </div>
-        <div>
-          <div><strong>Evidence methods</strong></div>
-          ${list(swmp.records_and_evidence.evidence_methods)}
-        </div>
-      </div>
+      ${swmp.monitoring.dockets_description ? `<div class="evidence-wording" style="margin-top:10px; font-size:13px;"><strong>Evidence wording</strong><p>${esc(swmp.monitoring.dockets_description)}</p></div>` : ""}
 
       <h2>Assumptions</h2>
       ${list(swmp.assumptions)}
+      ${(swmp.records_and_evidence.notes ?? "").trim() ? `<h2>Notes / additional context</h2><div class="cell-wrap" style="font-size:13px;">${String(swmp.records_and_evidence.notes ?? "")
+        .split(/\r?\n/)
+        .map((line) => esc(line))
+        .join("<br/>")}</div>` : ""}
 
       <div class="footer">
         <div>${esc(swmp.footer_text)}</div>
