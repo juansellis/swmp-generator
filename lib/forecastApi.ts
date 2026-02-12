@@ -159,15 +159,17 @@ export async function syncForecastAllocationToInputs(
 
   if (inputErr) throw new Error(inputErr.message);
 
-  const raw = inputRow?.[SWMP_INPUTS_JSON_COLUMN as keyof typeof inputRow];
+  const inputRowData = (inputRow ?? null) as unknown as { id?: string; [k: string]: unknown } | null;
+  const raw = inputRowData?.[SWMP_INPUTS_JSON_COLUMN];
   const inputs = raw ? normalizeSwmpInputs(raw) : defaultSwmpInputs(projectId);
   const updatedInputs = applyForecastToInputs(inputs, forAllocation);
 
-  if (inputRow?.id) {
+  const inputRowId = inputRowData?.id;
+  if (inputRowId) {
     const { error: updateErr } = await supabase
       .from("swmp_inputs")
       .update({ [SWMP_INPUTS_JSON_COLUMN]: updatedInputs })
-      .eq("id", inputRow.id);
+      .eq("id", inputRowId);
     if (updateErr) throw new Error(updateErr.message);
   } else {
     const { error: insertErr } = await supabase

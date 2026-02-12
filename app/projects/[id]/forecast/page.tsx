@@ -177,13 +177,14 @@ export default function ProjectForecastPage() {
         return;
       }
 
-      const raw = row[SWMP_INPUTS_JSON_COLUMN as keyof typeof row];
+      const inputsRow = row as unknown as { id: string; [k: string]: unknown };
+      const raw = inputsRow[SWMP_INPUTS_JSON_COLUMN];
       const inputs = normalizeSwmpInputs(raw ?? {});
       const updated = applyForecastToInputs(inputs, forecastItems);
       const { error: updateErr } = await supabase
         .from("swmp_inputs")
         .update({ [SWMP_INPUTS_JSON_COLUMN]: updated })
-        .eq("id", row.id);
+        .eq("id", inputsRow.id);
 
       if (updateErr && process.env.NODE_ENV === "development") {
         console.warn("[forecast] syncForecastToInputs failed", updateErr);
@@ -204,7 +205,7 @@ export default function ProjectForecastPage() {
         .limit(1)
         .maybeSingle();
 
-      let inputs = fetchErr || !row ? null : normalizeSwmpInputs(row[SWMP_INPUTS_JSON_COLUMN as keyof typeof row] ?? {});
+      let inputs = fetchErr || !row ? null : normalizeSwmpInputs((row as unknown as Record<string, unknown>)[SWMP_INPUTS_JSON_COLUMN] ?? {});
       if (!inputs) inputs = defaultSwmpInputs(projectId);
       const next = ensureStreamInInputs(inputs, streamKey);
       const streamAdded = (next.waste_streams?.length ?? 0) > (inputs?.waste_streams?.length ?? 0);
@@ -212,8 +213,9 @@ export default function ProjectForecastPage() {
         setProjectStreams(next.waste_streams ?? []);
         return;
       }
-      if (row?.id) {
-        await supabase.from("swmp_inputs").update({ [SWMP_INPUTS_JSON_COLUMN]: next }).eq("id", row.id);
+      const rowId = !fetchErr && row && typeof (row as unknown as { id?: string }).id === "string" ? (row as unknown as { id: string }).id : null;
+      if (rowId) {
+        await supabase.from("swmp_inputs").update({ [SWMP_INPUTS_JSON_COLUMN]: next }).eq("id", rowId);
       } else {
         await supabase.from("swmp_inputs").insert({ project_id: projectId, [SWMP_INPUTS_JSON_COLUMN]: next });
       }

@@ -61,7 +61,7 @@ export function WasteComparisonBar({ data, title = "Waste Stream Comparison" }: 
                   tickLine={false}
                 />
                 <Tooltip
-                  formatter={(value: number) => [`${Number(value).toFixed(3)} t`, ""]}
+                  formatter={(value: number | undefined) => [`${Number(value ?? 0).toFixed(3)} t`, ""]}
                   contentStyle={{ fontSize: "12px" }}
                   wrapperClassName="print:!hidden"
                   labelFormatter={(label) => String(label)}

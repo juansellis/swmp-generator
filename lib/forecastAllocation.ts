@@ -56,8 +56,8 @@ export function getMatchingProjectStream(
 
 export type ForecastItemForAllocation = {
   waste_stream_key: string | null;
-  /** Waste in kg; null = non-weight (excluded from totals). */
-  computed_waste_kg: number | null;
+  /** Waste in kg; null/undefined = non-weight (excluded from totals). */
+  computed_waste_kg?: number | null;
 };
 
 /** Compute total forecast tonnes per stream from items (computed_waste_kg / 1000). Only weight-based items contribute. */

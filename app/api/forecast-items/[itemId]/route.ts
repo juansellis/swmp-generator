@@ -11,7 +11,8 @@ async function requireForecastItemAccess(itemId: string) {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) {
-    return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) as const;
+    const res = NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return { error: res };
   }
 
   const { data: item, error: itemErr } = await supabase
@@ -21,7 +22,8 @@ async function requireForecastItemAccess(itemId: string) {
     .single();
 
   if (itemErr || !item) {
-    return { error: NextResponse.json({ error: "Forecast item not found" }, { status: 404 }) as const;
+    const res = NextResponse.json({ error: "Forecast item not found" }, { status: 404 });
+    return { error: res };
   }
 
   const { data: project, error: projectErr } = await supabase
@@ -31,7 +33,8 @@ async function requireForecastItemAccess(itemId: string) {
     .single();
 
   if (projectErr || !project || project.user_id !== user.id) {
-    return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) as const;
+    const res = NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    return { error: res };
   }
 
   return { supabase, projectId: item.project_id } as const;

@@ -49,7 +49,7 @@ export function WasteDistributionPie({ data, title = "Estimated Waste Distributi
                   ))}
                 </Pie>
                 <Tooltip
-                  formatter={(value: number) => [`${Number(value).toFixed(3)} t`, "Tonnes"]}
+                  formatter={(value: number | undefined) => [`${Number(value ?? 0).toFixed(3)} t`, "Tonnes"]}
                   contentStyle={{ fontSize: "12px" }}
                   wrapperClassName="print:!hidden"
                 />
