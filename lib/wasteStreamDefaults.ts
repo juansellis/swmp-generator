@@ -42,6 +42,9 @@ export const STREAM_DEFAULTS: Record<string, StreamDefault> = {
   "HDPE pipes / services": { densityKgM3: 100, defaultUnit: "m3" },
 };
 
+/** Ordered stream labels for dropdowns/multiselect (e.g. admin facilities). */
+export const STREAM_LABELS = Object.keys(STREAM_DEFAULTS) as string[];
+
 export type QtyToTonnesParams = {
   qty: number;
   unit: QtyUnit;
@@ -53,6 +56,45 @@ export type QtyToTonnesResult = {
   tonnes: number;
   missingThickness: boolean;
 };
+
+/**
+ * Convert a single value to tonnes. For reporting and display.
+ * - t/tonne: value as-is
+ * - kg: value / 1000
+ * - m3: (value * densityKgM3) / 1000 — requires densityKgM3
+ * - m2: (value * thicknessM * densityKgM3) / 1000 — requires densityKgM3 and thicknessM
+ * - L: (value/1000)*densityKgM3/1000 — requires densityKgM3 (density in kg/m³; L as volume)
+ * Returns null if conversion not possible (e.g. m2 without thickness).
+ */
+export function toTonnes(
+  value: number,
+  unit: string,
+  options?: { densityKgM3?: number | null; thicknessM?: number | null }
+): number | null {
+  if (value < 0 || !Number.isFinite(value)) return null;
+  const density = options?.densityKgM3 ?? 1000;
+  const thicknessM = options?.thicknessM;
+  const u = String(unit).toLowerCase();
+  switch (u) {
+    case "t":
+    case "tonne":
+    case "tonnes":
+      return value;
+    case "kg":
+      return value / 1000;
+    case "m3":
+      return density != null && density > 0 ? (value * density) / 1000 : null;
+    case "l":
+      return density != null && density > 0 ? (value / 1000) * (density / 1000) : null;
+    case "m2": {
+      const t = thicknessM != null && !Number.isNaN(thicknessM) && thicknessM >= 0 ? thicknessM : null;
+      if (t === null || density == null || density <= 0) return null;
+      return (value * t * density) / 1000;
+    }
+    default:
+      return null;
+  }
+}
 
 /**
  * Convert quantity in given unit to tonnes using density (and thickness for m2).
@@ -101,6 +143,39 @@ export function getDefaultThicknessForStreamLabel(stream: string): number | unde
   return d?.defaultThicknessM;
 }
 
+export type PlanLikeForTonnes = {
+  estimated_qty?: number | null;
+  unit?: string | null;
+  density_kg_m3?: number | null;
+  thickness_m?: number | null;
+};
+
+/**
+ * Compute manual quantity in tonnes from a plan (estimated_qty + unit + density/thickness).
+ * Uses stream label for default density and thickness when plan values are missing.
+ * Returns null if no quantity or conversion not possible (e.g. m2 without thickness).
+ */
+export function planManualQtyToTonnes(
+  plan: PlanLikeForTonnes,
+  streamLabel: string
+): number | null {
+  const qty = plan.estimated_qty;
+  if (qty == null || !Number.isFinite(qty) || qty < 0) return null;
+  const unit = (plan.unit ?? getDefaultUnitForStreamLabel(streamLabel)) as QtyUnit;
+  const density =
+    plan.density_kg_m3 != null && plan.density_kg_m3 > 0
+      ? plan.density_kg_m3
+      : getDensityForStreamLabel(streamLabel);
+  const thicknessM =
+    unit === "m2"
+      ? plan.thickness_m ?? getDefaultThicknessForStreamLabel(streamLabel)
+      : undefined;
+  return toTonnes(qty, unit, {
+    densityKgM3: density,
+    thicknessM: thicknessM ?? undefined,
+  });
+}
+
 /** Density (kg/m³) for a stream label. Falls back to 1000 if not in map. */
 export function getDensityForStreamLabel(stream: string): number {
   const d = STREAM_DEFAULTS[stream];
@@ -113,11 +188,16 @@ export function getDensityForStreamLabel(stream: string): number {
 
 export type PlanForDiversion = {
   category: string;
+  /** Manual quantity in plan unit (converted to tonnes if manual_qty_tonnes not provided). */
   estimated_qty?: number | null;
   unit?: QtyUnit | string | null;
   density_kg_m3?: number | null;
   thickness_m?: number | null;
   intended_outcomes: string[];
+  /** Precomputed manual quantity in tonnes (overrides estimated_qty conversion when set). */
+  manual_qty_tonnes?: number | null;
+  /** Allocated forecast quantity in tonnes (from forecast items allocated to this stream). */
+  forecast_qty_tonnes?: number | null;
 };
 
 export type DiversionResult = {
@@ -129,9 +209,11 @@ export type DiversionResult = {
 };
 
 /**
- * Compute diversion metrics from plans using qtyToTonnes.
+ * Compute diversion metrics from plans.
+ * total_tonnes per stream = manual_qty_tonnes + forecast_qty_tonnes (converted as needed).
  * diversionReuseRecyclePct: tonnes with Reuse or Recycle / total tonnes.
  * landfillAvoidancePct: tonnes with Reuse, Recycle, or Cleanfill / total tonnes.
+ * Stream "has quantity" when total_tonnes > 0.
  */
 export function computeDiversion(plans: PlanForDiversion[]): DiversionResult {
   const missingThicknessStreams: string[] = [];
@@ -141,46 +223,59 @@ export function computeDiversion(plans: PlanForDiversion[]): DiversionResult {
   let landfillAvoidanceTonnes = 0; // Reuse, Recycle, or Cleanfill
 
   for (const p of plans) {
-    const qty = p.estimated_qty;
-    const hasQty = typeof qty === "number" && !Number.isNaN(qty) && qty >= 0;
-    if (!hasQty) {
+    // Manual tonnes: use precomputed or convert estimated_qty
+    let manualTonnes = 0;
+    if (p.manual_qty_tonnes != null && Number.isFinite(p.manual_qty_tonnes) && p.manual_qty_tonnes >= 0) {
+      manualTonnes = p.manual_qty_tonnes;
+    } else {
+      const qty = p.estimated_qty;
+      const hasQty = typeof qty === "number" && !Number.isNaN(qty) && qty >= 0;
+      if (hasQty) {
+        const unit = (p.unit ?? getDefaultUnitForStreamLabel(p.category)) as QtyUnit;
+        const density = p.density_kg_m3 != null && p.density_kg_m3 > 0
+          ? p.density_kg_m3
+          : getDensityForStreamLabel(p.category);
+        const thicknessM =
+          unit === "m2"
+            ? p.thickness_m != null && !Number.isNaN(p.thickness_m) && p.thickness_m >= 0
+              ? p.thickness_m
+              : getDefaultThicknessForStreamLabel(p.category)
+            : undefined;
+        const { tonnes, missingThickness } = qtyToTonnes({
+          qty,
+          unit,
+          densityKgM3: density,
+          thicknessM: thicknessM ?? null,
+        });
+        if (missingThickness) {
+          missingThicknessStreams.push(p.category);
+          continue;
+        }
+        manualTonnes = tonnes;
+      }
+    }
+
+    const forecastTonnes =
+      p.forecast_qty_tonnes != null && Number.isFinite(p.forecast_qty_tonnes) && p.forecast_qty_tonnes >= 0
+        ? p.forecast_qty_tonnes
+        : 0;
+    const streamTotalTonnes = manualTonnes + forecastTonnes;
+
+    if (streamTotalTonnes <= 0) {
       missingQuantityStreams.push(p.category);
       continue;
     }
 
-    const unit = (p.unit ?? getDefaultUnitForStreamLabel(p.category)) as QtyUnit;
-    const density = p.density_kg_m3 != null && p.density_kg_m3 > 0
-      ? p.density_kg_m3
-      : getDensityForStreamLabel(p.category);
-    const thicknessM =
-      unit === "m2"
-        ? p.thickness_m != null && !Number.isNaN(p.thickness_m) && p.thickness_m >= 0
-          ? p.thickness_m
-          : getDefaultThicknessForStreamLabel(p.category)
-        : undefined;
-
-    const { tonnes, missingThickness } = qtyToTonnes({
-      qty,
-      unit,
-      densityKgM3: density,
-      thicknessM: thicknessM ?? null,
-    });
-
-    if (missingThickness) {
-      missingThicknessStreams.push(p.category);
-      continue;
-    }
-
-    totalTonnes += tonnes;
+    totalTonnes += streamTotalTonnes;
     const outcomes = p.intended_outcomes ?? [];
     const hasReuseRecycle =
       outcomes.includes("Reuse") || outcomes.includes("Recycle");
     const hasCleanfill = outcomes.includes("Cleanfill");
     if (hasReuseRecycle) {
-      diversionTonnes += tonnes;
-      landfillAvoidanceTonnes += tonnes;
+      diversionTonnes += streamTotalTonnes;
+      landfillAvoidanceTonnes += streamTotalTonnes;
     } else if (hasCleanfill) {
-      landfillAvoidanceTonnes += tonnes;
+      landfillAvoidanceTonnes += streamTotalTonnes;
     }
   }
 

@@ -58,3 +58,35 @@ body {
 .animate-accordion-up {
   animation: accordion-up 0.2s ease-out;
 }
+
+/* Export / Print: hide app chrome, show only SWMP content */
+@media print {
+  nav[aria-label="Main"],
+  header nav,
+  .print\:hidden {
+    display: none !important;
+  }
+  [data-export] {
+    max-width: 100% !important;
+    padding: 0 !important;
+  }
+  [data-export] .swmp-html {
+    max-width: 100% !important;
+  }
+  body {
+    background: #fff !important;
+  }
+  /* Charts: keep SVG visible, avoid clipping in PDF */
+  .waste-chart-pie,
+  .waste-chart-bar {
+    overflow: visible !important;
+  }
+  .waste-chart-pie svg,
+  .waste-chart-bar svg {
+    visibility: visible !important;
+    max-width: 100% !important;
+  }
+  .recharts-tooltip-wrapper {
+    display: none !important;
+  }
+}

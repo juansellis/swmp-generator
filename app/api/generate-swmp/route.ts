@@ -9,7 +9,7 @@ import { zodTextFormat } from "openai/helpers/zod";
 
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { SwmpSchema } from "@/lib/swmpSchema";
-import { renderSwmpHtml } from "@/lib/renderSwmp";
+import { renderSwmpHtml, type ForecastItemForAppendix } from "@/lib/renderSwmp";
 import {
   normalizeSwmpInputs,
   SWMP_INPUTS_JSON_COLUMN,
@@ -339,9 +339,88 @@ Output must follow the provided schema exactly.
     }
     // Overlay site controls so report reflects user-edited inputs (mock and real path)
     swmp.on_site_controls = buildOnSiteControlsFromInputs(normalizedInputs.site_controls);
+    // Overlay waste stream plans so manual_qty_tonnes and forecast_qty from inputs are used in the report
+    swmp.waste_stream_plans = ensuredWasteStreamPlans;
+
+    // Resolve partner/facility IDs to names for report (including primary + per-stream waste contractor)
+    const projectPrimaryContractorId = (project as { primary_waste_contractor_partner_id?: string | null })
+      ?.primary_waste_contractor_partner_id;
+    const planPartnerIds = (swmp.waste_stream_plans ?? []).map(
+      (p: { partner_id?: string | null }) => p?.partner_id
+    ).filter((id: string | null | undefined): id is string => !!id && id.trim().length > 0);
+    const planContractorIds = (swmp.waste_stream_plans ?? []).map(
+      (p: { waste_contractor_partner_id?: string | null }) => p?.waste_contractor_partner_id
+    ).filter((id: string | null | undefined): id is string => !!id && id.trim().length > 0);
+    const partnerIds = [
+      ...new Set([
+        ...planPartnerIds,
+        ...(projectPrimaryContractorId ? [projectPrimaryContractorId] : []),
+        ...planContractorIds,
+      ]),
+    ];
+    const facilityIds = [
+      ...new Set(
+        (swmp.waste_stream_plans ?? [])
+          .map((p: { facility_id?: string | null }) => p?.facility_id)
+          .filter((id: string | null | undefined): id is string => !!id && id.trim().length > 0)
+      ),
+    ];
+    let partnerMap: Record<string, { name: string }> = {};
+    let facilityMap: Record<string, { name: string; address?: string | null }> = {};
+    if (partnerIds.length > 0) {
+      const { data: partners } = await supabaseAdmin
+        .from("partners")
+        .select("id, name")
+        .in("id", partnerIds);
+      if (partners) {
+        for (const row of partners) {
+          partnerMap[row.id] = { name: row.name ?? "" };
+        }
+      }
+    }
+    if (facilityIds.length > 0) {
+      const { data: facilities } = await supabaseAdmin
+        .from("facilities")
+        .select("id, name, address")
+        .in("id", facilityIds);
+      if (facilities) {
+        for (const row of facilities) {
+          facilityMap[row.id] = { name: row.name ?? "", address: row.address ?? null };
+        }
+      }
+    }
+    const lookups = {
+      getPartnerById: (id: string | null | undefined) =>
+        id ? partnerMap[id] ?? null : null,
+      getFacilityById: (id: string | null | undefined) =>
+        id ? facilityMap[id] ?? null : null,
+    };
+
+    const primaryWasteContractorName =
+      projectPrimaryContractorId ? partnerMap[projectPrimaryContractorId]?.name ?? null : null;
+    if (swmp.project && typeof swmp.project === "object") {
+      (swmp.project as Record<string, unknown>).primary_waste_contractor_name = primaryWasteContractorName ?? "—";
+    }
+
+    // Fetch forecast items for appendix (item name, quantity, unit, excess %, computed_waste_kg, waste_stream_key)
+    let forecastItems: ForecastItemForAppendix[] = [];
+    const { data: forecastRows } = await supabaseAdmin
+      .from("project_forecast_items")
+      .select("item_name, quantity, unit, excess_percent, computed_waste_kg, waste_stream_key")
+      .eq("project_id", project_id);
+    if (Array.isArray(forecastRows)) {
+      forecastItems = forecastRows.map((r) => ({
+        item_name: String(r?.item_name ?? "").trim() || "—",
+        quantity: Number(r?.quantity) ?? 0,
+        unit: String(r?.unit ?? "").trim() || "—",
+        excess_percent: Number(r?.excess_percent) ?? 0,
+        computed_waste_kg: r?.computed_waste_kg != null ? Number(r.computed_waste_kg) : null,
+        waste_stream_key: r?.waste_stream_key != null ? String(r.waste_stream_key).trim() || null : null,
+      }));
+    }
 
     // 5) Render HTML for viewing/export (deterministic renderer uses swmp.branding/footer_text)
-    const html = renderSwmpHtml(swmp);
+    const html = renderSwmpHtml(swmp, lookups, { forecastItems });
 
     // 6) Save SWMP record
     const { data: saved, error: saveErr } = await supabaseAdmin

@@ -5,4 +5,7 @@
 export type Partner = {
   id: string;
   name: string;
+  regions: string[];
+  partner_type: string;
+  notes?: string | null;
 };

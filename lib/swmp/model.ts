@@ -39,6 +39,8 @@ export type WasteStreamPlanInput = {
   notes?: string | null;
   estimated_qty?: number | null;
   unit?: PlanUnit | null;
+  /** Manual quantity converted to tonnes for reporting; set on save from estimated_qty + unit + density/thickness. */
+  manual_qty_tonnes?: number | null;
   /** Override density (kg/m³) for conversion to tonnes. */
   density_kg_m3?: number | null;
   /** Override thickness (m) for m2 unit conversion. */
@@ -48,6 +50,12 @@ export type WasteStreamPlanInput = {
   /** @deprecated Legacy; use facility_id + destination_override. */
   destination?: string | null;
   distance_km?: number | null;
+  /** Optional waste contractor (partner) override for this stream; null = use project primary. */
+  waste_contractor_partner_id?: string | null;
+  /** Forecast quantity for this stream (always tonnes). Stored in inputs JSON; RLS via swmp_inputs. */
+  forecast_qty?: number | null;
+  /** Unit for forecast_qty; always tonne for reporting. */
+  forecast_unit?: string | null;
 };
 
 // ---------------------------------------------------------------------------
@@ -259,6 +267,7 @@ export function defaultSwmpInputs(projectId?: string): SwmpInputs {
       pathway: `Segregate ${category} where practical and send to an approved recycler/processor.`,
       notes: null,
       estimated_qty: null,
+      manual_qty_tonnes: null,
       unit: getDefaultUnitForStream(category),
       density_kg_m3: null,
       thickness_m: null,
@@ -266,6 +275,9 @@ export function defaultSwmpInputs(projectId?: string): SwmpInputs {
       on_site_management: null,
       destination: null,
       distance_km: null,
+      waste_contractor_partner_id: null,
+      forecast_qty: null,
+      forecast_unit: null,
     })),
     hazards: { asbestos: false, lead_paint: false, contaminated_soil: false },
     logistics: {
@@ -334,6 +346,9 @@ function normalizeWasteStreamPlan(raw: unknown): WasteStreamPlanInput {
   const distance_km = num(p?.distance_km) != null && (num(p?.distance_km) as number) >= 0 ? (num(p?.distance_km) as number) : null;
   const density_kg_m3 = num(p?.density_kg_m3) != null && (num(p?.density_kg_m3) as number) > 0 ? (num(p?.density_kg_m3) as number) : null;
   const thickness_m = num(p?.thickness_m) != null && (num(p?.thickness_m) as number) >= 0 ? (num(p?.thickness_m) as number) : null;
+  const forecast_qty = num(p?.forecast_qty) != null && (num(p?.forecast_qty) as number) >= 0 ? (num(p?.forecast_qty) as number) : null;
+  const forecast_unit = (p?.forecast_unit != null && String(p.forecast_unit).trim()) ? String(p.forecast_unit).trim() : null;
+  const manual_qty_tonnes = num(p?.manual_qty_tonnes) != null && (num(p?.manual_qty_tonnes) as number) >= 0 ? (num(p?.manual_qty_tonnes) as number) : null;
 
   const partner_id = p?.partner_id != null && String(p.partner_id).trim() ? String(p.partner_id).trim() : null;
   const facility_id = p?.facility_id != null && String(p.facility_id).trim() ? String(p.facility_id).trim() : null;
@@ -363,6 +378,13 @@ function normalizeWasteStreamPlan(raw: unknown): WasteStreamPlanInput {
     on_site_management: (p?.on_site_management != null && String(p.on_site_management).trim()) || null,
     destination: (p?.destination != null && String(p.destination).trim()) || null,
     distance_km,
+    waste_contractor_partner_id:
+      p?.waste_contractor_partner_id != null && String(p.waste_contractor_partner_id).trim()
+        ? String(p.waste_contractor_partner_id).trim()
+        : null,
+    forecast_qty: forecast_qty != null && forecast_qty >= 0 ? forecast_qty : null,
+    forecast_unit: forecast_unit ?? null,
+    manual_qty_tonnes: manual_qty_tonnes != null && manual_qty_tonnes >= 0 ? manual_qty_tonnes : null,
   };
 }
 

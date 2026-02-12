@@ -5,9 +5,9 @@
 
 export type Facility = {
   id: string;
-  name: string;
-  type: string;
   partner_id: string;
+  name: string;
+  facility_type: string;
   region: string;
   accepted_streams: string[];
   address?: string | null;
