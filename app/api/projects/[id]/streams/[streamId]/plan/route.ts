@@ -81,9 +81,8 @@ export async function PATCH(req: Request, { params }: Params) {
     return NextResponse.json({ error: fetchErr.message }, { status: 500 });
   }
 
-  const rawInputs = row
-    ? (row as Record<string, unknown>)[SWMP_INPUTS_JSON_COLUMN]
-    : null;
+  const rowObj = row as unknown as Record<string, unknown> | null;
+  const rawInputs = rowObj ? rowObj[SWMP_INPUTS_JSON_COLUMN] : null;
   const inputs = rawInputs
     ? normalizeSwmpInputs({ ...(rawInputs as object), project_id: projectId })
     : null;
@@ -108,7 +107,7 @@ export async function PATCH(req: Request, { params }: Params) {
   });
   const nextInputs = { ...inputs, waste_stream_plans: updatedPlans };
 
-  const rowId = row && typeof (row as { id?: string }).id === "string" ? (row as { id: string }).id : null;
+  const rowId = rowObj && typeof rowObj.id === "string" ? rowObj.id : null;
   if (rowId) {
     const { error: updateErr } = await supabase
       .from("swmp_inputs")
