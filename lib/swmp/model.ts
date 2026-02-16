@@ -26,12 +26,22 @@ export type WasteStreamPlanInput = {
   category: string;
   sub_material?: string | null;
   intended_outcomes: string[];
+  /** Destination type: facility from catalog, or custom address. */
+  destination_mode?: "facility" | "custom" | null;
   /** Partner (company) id from presets; null = Other/custom. */
   partner_id?: string | null;
-  /** Facility (site) id from presets; null = use destination_override. */
+  /** Facility (site) id from presets; null = use custom destination. */
   facility_id?: string | null;
   /** Custom destination text when partner is Other or no facility selected. */
   destination_override?: string | null;
+  /** Custom destination display name (required when destination_mode === 'custom'). */
+  custom_destination_name?: string | null;
+  /** Custom destination address from Places (required when destination_mode === 'custom'). */
+  custom_destination_address?: string | null;
+  /** Google Place ID for custom destination. */
+  custom_destination_place_id?: string | null;
+  custom_destination_lat?: number | null;
+  custom_destination_lng?: number | null;
   /** @deprecated Legacy; use partner_id + destination_override. */
   partner?: string | null;
   partner_overridden?: boolean;
@@ -50,12 +60,16 @@ export type WasteStreamPlanInput = {
   /** @deprecated Legacy; use facility_id + destination_override. */
   destination?: string | null;
   distance_km?: number | null;
+  /** Cached drive duration in minutes (from distance recompute). */
+  duration_min?: number | null;
   /** Optional waste contractor (partner) override for this stream; null = use project primary. */
   waste_contractor_partner_id?: string | null;
   /** Forecast quantity for this stream (always tonnes). Stored in inputs JSON; RLS via swmp_inputs. */
   forecast_qty?: number | null;
   /** Unit for forecast_qty; always tonne for reporting. */
   forecast_unit?: string | null;
+  /** Handling: mixed = co-mingled, separated = source-separated onsite. Default mixed. */
+  handling_mode?: "mixed" | "separated" | null;
 };
 
 // ---------------------------------------------------------------------------
@@ -259,9 +273,15 @@ export function defaultSwmpInputs(projectId?: string): SwmpInputs {
       category,
       sub_material: null,
       intended_outcomes: getDefaultIntendedOutcomesForStream(category),
+      destination_mode: "facility",
       partner_id: null,
       facility_id: null,
       destination_override: null,
+      custom_destination_name: null,
+      custom_destination_address: null,
+      custom_destination_place_id: null,
+      custom_destination_lat: null,
+      custom_destination_lng: null,
       partner: null,
       partner_overridden: false,
       pathway: `Segregate ${category} where practical and send to an approved recycler/processor.`,
@@ -275,9 +295,11 @@ export function defaultSwmpInputs(projectId?: string): SwmpInputs {
       on_site_management: null,
       destination: null,
       distance_km: null,
+      duration_min: null,
       waste_contractor_partner_id: null,
       forecast_qty: null,
       forecast_unit: null,
+      handling_mode: "mixed",
     })),
     hazards: { asbestos: false, lead_paint: false, contaminated_soil: false },
     logistics: {
@@ -357,13 +379,41 @@ function normalizeWasteStreamPlan(raw: unknown): WasteStreamPlanInput {
   const explicitOverride = (p?.destination_override != null && String(p.destination_override).trim()) ? String(p.destination_override).trim() : null;
   const destination_override = explicitOverride ?? legacyDest ?? null;
 
+  const rawMode = p?.destination_mode;
+  const hasCustomDest =
+    (explicitOverride ?? legacyDest ?? "").trim() !== "" ||
+    (p?.custom_destination_address != null && String(p.custom_destination_address).trim() !== "") ||
+    (p?.custom_destination_place_id != null && String(p.custom_destination_place_id).trim() !== "");
+  const destination_mode: "facility" | "custom" =
+    rawMode === "custom"
+      ? "custom"
+      : rawMode === "facility"
+        ? "facility"
+        : facility_id != null && facility_id !== ""
+          ? "facility"
+          : hasCustomDest
+            ? "custom"
+            : "facility";
+  const custom_destination_name = (p?.custom_destination_name != null && String(p.custom_destination_name).trim()) ? String(p.custom_destination_name).trim() : null;
+  const custom_destination_address = (p?.custom_destination_address != null && String(p.custom_destination_address).trim()) ? String(p.custom_destination_address).trim() : null;
+  const custom_destination_place_id = (p?.custom_destination_place_id != null && String(p.custom_destination_place_id).trim()) ? String(p.custom_destination_place_id).trim() : null;
+  const custom_destination_lat = num(p?.custom_destination_lat) != null ? (num(p?.custom_destination_lat) as number) : null;
+  const custom_destination_lng = num(p?.custom_destination_lng) != null ? (num(p?.custom_destination_lng) as number) : null;
+  const duration_min = num(p?.duration_min) != null && (num(p?.duration_min) as number) >= 0 ? (num(p?.duration_min) as number) : null;
+
   return {
     category,
     sub_material: (p?.sub_material != null && String(p.sub_material).trim()) || null,
     intended_outcomes,
+    destination_mode,
     partner_id,
     facility_id,
     destination_override,
+    custom_destination_name,
+    custom_destination_address,
+    custom_destination_place_id,
+    custom_destination_lat,
+    custom_destination_lng,
     partner: (p?.partner != null && String(p.partner).trim()) || null,
     partner_overridden: !!p?.partner_overridden,
     pathway:
@@ -378,6 +428,7 @@ function normalizeWasteStreamPlan(raw: unknown): WasteStreamPlanInput {
     on_site_management: (p?.on_site_management != null && String(p.on_site_management).trim()) || null,
     destination: (p?.destination != null && String(p.destination).trim()) || null,
     distance_km,
+    duration_min,
     waste_contractor_partner_id:
       p?.waste_contractor_partner_id != null && String(p.waste_contractor_partner_id).trim()
         ? String(p.waste_contractor_partner_id).trim()
@@ -385,6 +436,10 @@ function normalizeWasteStreamPlan(raw: unknown): WasteStreamPlanInput {
     forecast_qty: forecast_qty != null && forecast_qty >= 0 ? forecast_qty : null,
     forecast_unit: forecast_unit ?? null,
     manual_qty_tonnes: manual_qty_tonnes != null && manual_qty_tonnes >= 0 ? manual_qty_tonnes : null,
+    handling_mode:
+      p?.handling_mode === "separated" || p?.handling_mode === "mixed"
+        ? p.handling_mode
+        : "mixed",
   };
 }
 

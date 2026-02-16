@@ -35,6 +35,14 @@ body {
 @tailwind components;
 @tailwind utilities;
 
+/* Google Places Autocomplete dropdown above modals/dialogs */
+.pac-container {
+  z-index: 2147483647 !important;
+}
+.pac-item {
+  cursor: pointer;
+}
+
 @keyframes accordion-down {
   from {
     height: 0;

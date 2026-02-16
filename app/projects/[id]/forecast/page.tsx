@@ -47,8 +47,18 @@ export default function ProjectForecastPage() {
   const searchParams = useSearchParams();
   const projectId = params?.id ?? null;
   const filterStream = searchParams?.get("stream") ?? null;
+  const filterFromUrl = searchParams?.get("filter") as FilterStatus | null;
   const ctx = useProjectContext();
-  const [filterStatus, setFilterStatus] = React.useState<FilterStatus>("all");
+  const [filterStatus, setFilterStatus] = React.useState<FilterStatus>(
+    filterFromUrl && ["all", "unallocated", "needs_conversion", "included"].includes(filterFromUrl)
+      ? filterFromUrl
+      : "all"
+  );
+  React.useEffect(() => {
+    if (filterFromUrl && ["all", "unallocated", "needs_conversion", "included"].includes(filterFromUrl)) {
+      setFilterStatus(filterFromUrl);
+    }
+  }, [filterFromUrl]);
   const [allocateAllOpen, setAllocateAllOpen] = React.useState(false);
   const [allocateAllLoading, setAllocateAllLoading] = React.useState(false);
 
@@ -109,6 +119,9 @@ export default function ProjectForecastPage() {
 
   const loadItems = React.useCallback(async () => {
     if (!projectId) return;
+    if (process.env.NODE_ENV === "development") {
+      console.time("[perf] forecast items fetch");
+    }
     setItemsLoading(true);
     setItemsError(null);
     const [itemsRes, inputsRes, _] = await Promise.all([
@@ -151,6 +164,9 @@ export default function ProjectForecastPage() {
       setProjectStreams([]);
     }
     setItemsLoading(false);
+    if (process.env.NODE_ENV === "development") {
+      console.timeEnd("[perf] forecast items fetch");
+    }
   }, [projectId, setForecastCount]);
 
   // Initial load when projectId is set. Autosave does not call loadItems (no refetch after save).
@@ -490,7 +506,7 @@ export default function ProjectForecastPage() {
 
   return (
     <AppShell>
-      <div className="space-y-6">
+      <div className="space-y-10">
         <ProjectHeader />
         <PageHeader title="Forecast" />
 
@@ -579,6 +595,9 @@ export default function ProjectForecastPage() {
                         Fix conversions
                       </Button>
                     </div>
+                  )}
+                  {saveStatus === "saving" && (
+                    <p className="mb-2 text-xs text-muted-foreground" aria-live="polite">Saving…</p>
                   )}
                   <div className="mb-3 flex flex-wrap items-center gap-2">
                     <span className="text-muted-foreground text-sm">Filter:</span>

@@ -29,6 +29,7 @@ import { ProjectCard } from "@/components/project-card";
 import { QuickCreateProjectModal } from "@/components/quick-create-project-modal";
 import type { QuickCreateProjectFormState } from "@/components/quick-create-project-modal";
 import { Skeleton } from "@/components/ui/skeleton";
+import { AddressPicker, type AddressPickerValue } from "@/components/address-picker";
 import {
   FolderOpen,
   Recycle,
@@ -36,6 +37,7 @@ import {
   TrendingUp,
 } from "lucide-react";
 import type { DashboardMetricsResponse } from "@/app/api/dashboard/metrics/route";
+import type { PlanningChecklist } from "@/lib/planning/planningChecklist";
 
 type ProjectRow = {
   id: string;
@@ -116,6 +118,8 @@ export default function ProjectsPage() {
   const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [listLoading, setListLoading] = useState(false);
   const [statusByProjectId, setStatusByProjectId] = useState<Map<string, ProjectStatusData>>(new Map());
+  const [checklistByProjectId, setChecklistByProjectId] = useState<Map<string, PlanningChecklist>>(new Map());
+  const [checklistsLoading, setChecklistsLoading] = useState(false);
   const [metrics, setMetrics] = useState<DashboardMetricsResponse | null>(null);
   const [metricsLoading, setMetricsLoading] = useState(false);
   const [metricsError, setMetricsError] = useState<string | null>(null);
@@ -123,6 +127,7 @@ export default function ProjectsPage() {
   // Create form state
   const [name, setName] = useState("");
   const [address, setAddress] = useState("");
+  const [siteAddressValidated, setSiteAddressValidated] = useState<AddressPickerValue | null>(null);
   const [region, setRegion] = useState<(typeof REGION_OPTIONS)[number] | "">("");
   const [projectType, setProjectType] = useState("");
   const [projectTypeOther, setProjectTypeOther] = useState("");
@@ -143,7 +148,7 @@ export default function ProjectsPage() {
   const requiredFields = useMemo(() => {
     const effective = projectType === "Other" ? projectTypeOther.trim() : projectType.trim();
     const errors: string[] = [];
-    if (!address.trim()) errors.push("Site address");
+    if (!siteAddressValidated?.place_id || siteAddressValidated.lat == null || siteAddressValidated.lng == null) errors.push("Site address (choose from suggestions)");
     if (!region) errors.push("Region");
     if (!effective) errors.push("Project type");
     if (!startDate) errors.push("Start date");
@@ -151,7 +156,7 @@ export default function ProjectsPage() {
     if (!mainContractor.trim()) errors.push("Main contractor");
     if (!swmpOwner.trim()) errors.push("SWMP owner");
     return errors;
-  }, [address, region, projectType, projectTypeOther, startDate, clientName, mainContractor, swmpOwner]);
+  }, [siteAddressValidated, region, projectType, projectTypeOther, startDate, clientName, mainContractor, swmpOwner]);
 
   const canCreate = useMemo(() => {
     return (
@@ -271,6 +276,31 @@ export default function ProjectsPage() {
     const statusMap = await fetchProjectStatusDataForProjects(supabase, ids);
     setStatusByProjectId(statusMap);
     setListLoading(false);
+
+    // Fetch planning checklists in parallel (non-blocking)
+    if (ids.length > 0) {
+      setChecklistsLoading(true);
+      Promise.all(
+        ids.map((id) =>
+          fetch(`/api/projects/${id}/planning-checklist`, { credentials: "include" })
+            .then((r) => (r.ok ? r.json() : null))
+            .catch(() => null)
+        )
+      )
+        .then((results) => {
+          const map = new Map<string, PlanningChecklist>();
+          ids.forEach((id, i) => {
+            const data = results[i];
+            if (data && typeof data.readiness_score === "number" && Array.isArray(data.items)) {
+              map.set(id, data as PlanningChecklist);
+            }
+          });
+          setChecklistByProjectId(map);
+        })
+        .finally(() => setChecklistsLoading(false));
+    } else {
+      setChecklistByProjectId(new Map());
+    }
   }
 
   useEffect(() => {
@@ -338,11 +368,34 @@ export default function ProjectsPage() {
     setCreateLoading(true);
 
     try {
+      const validated = siteAddressValidated;
+      if (!validated?.place_id || validated.lat == null || validated.lng == null) {
+        setCreateError("Please select a site address from the suggestions.");
+        setCreateLoading(false);
+        return;
+      }
+      const validateRes = await fetch("/api/validate-address", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ place_id: validated.place_id }),
+      });
+      if (!validateRes.ok) {
+        const err = await validateRes.json();
+        setCreateError(err?.error ?? "Address validation failed.");
+        setCreateLoading(false);
+        return;
+      }
+      const serverAddress = (await validateRes.json()) as { formatted_address: string; place_id: string; lat: number; lng: number };
       const ptSave = projectType === "Other" ? (projectTypeOther.trim() || "Other") : projectType;
       const insertPayload = {
         user_id: user!.id,
         name: name.trim(),
-        address: address.trim(),
+        address: serverAddress.formatted_address,
+        site_address: serverAddress.formatted_address,
+        site_place_id: serverAddress.place_id,
+        site_lat: serverAddress.lat,
+        site_lng: serverAddress.lng,
         region: region,
         project_type: ptSave,
         start_date: startDate,
@@ -367,6 +420,7 @@ export default function ProjectsPage() {
       // Reset form
       setName("");
       setAddress("");
+      setSiteAddressValidated(null);
       setRegion("");
       setProjectType("");
       setProjectTypeOther("");
@@ -396,7 +450,7 @@ export default function ProjectsPage() {
       return;
     }
     const missing: string[] = [];
-    if (!state.address.trim()) missing.push("Site address");
+    if (!state.place_id || state.lat == null || state.lng == null) missing.push("Site address (choose from suggestions)");
     if (!state.region) missing.push("Region");
     const pt = state.projectType === "Other" ? state.projectTypeOther.trim() : state.projectType.trim();
     if (!pt) missing.push("Project type");
@@ -408,13 +462,29 @@ export default function ProjectsPage() {
       setQuickCreateError(`Please fill in: ${missing.join(", ")}`);
       return;
     }
+    const validateRes = await fetch("/api/validate-address", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ place_id: state.place_id }),
+    });
+    if (!validateRes.ok) {
+      const err = await validateRes.json();
+      setQuickCreateError(err?.error ?? "Address validation failed.");
+      return;
+    }
+    const serverAddress = (await validateRes.json()) as { formatted_address: string; place_id: string; lat: number; lng: number };
     const ptSave = state.projectType === "Other" ? (state.projectTypeOther.trim() || "Other") : state.projectType;
     const { data, error } = await supabase
       .from("projects")
       .insert({
         user_id: user.id,
         name: state.name.trim(),
-        address: state.address.trim(),
+        address: serverAddress.formatted_address,
+        site_address: serverAddress.formatted_address,
+        site_place_id: serverAddress.place_id,
+        site_lat: serverAddress.lat,
+        site_lng: serverAddress.lng,
         region: state.region,
         project_type: ptSave,
         start_date: state.startDate,
@@ -517,12 +587,20 @@ export default function ProjectsPage() {
 
                   <div className="grid gap-2">
                     <Label>Site address *</Label>
-                    <Input
+                    <AddressPicker
                       value={address}
-                      onChange={(e) => setAddress(e.target.value)}
-                      placeholder="e.g., 26 Hobson Street, Auckland CBD"
+                      onChange={(v) => {
+                        setSiteAddressValidated(v);
+                        setAddress(v?.formatted_address ?? "");
+                      }}
+                      onInput={(v) => {
+                        setAddress(v);
+                        if (!v.trim()) setSiteAddressValidated(null);
+                      }}
+                      placeholder="Search address…"
                       disabled={createLoading}
                     />
+                    <p className="text-xs text-muted-foreground">Choose from suggestions to validate the address.</p>
                   </div>
                 </div>
 
@@ -756,6 +834,7 @@ export default function ProjectsPage() {
                         outputs_generated: false,
                       }}
                       onOpen={() => router.push(`/projects/${p.id}/inputs`)}
+                      checklist={checklistByProjectId.get(p.id) ?? null}
                     />
                   ))}
                 </div>

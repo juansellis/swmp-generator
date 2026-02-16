@@ -121,6 +121,7 @@ function buildNewPlanForCategory(category: string): WasteStreamPlanInput {
     waste_contractor_partner_id: null,
     forecast_qty: null,
     forecast_unit: "tonne",
+    handling_mode: "mixed",
   };
 }
 

@@ -32,7 +32,7 @@ function totalTonnes(items: ForecastItemRow[]): number {
   return t;
 }
 
-export function ForecastSummary({ items, className }: ForecastSummaryProps) {
+function ForecastSummaryInner({ items, className }: ForecastSummaryProps) {
   const byMaterial = React.useMemo(() => {
     const map = new Map<string, number>();
     for (const row of items) {
@@ -137,3 +137,5 @@ export function ForecastSummary({ items, className }: ForecastSummaryProps) {
     </aside>
   );
 }
+
+export const ForecastSummary = React.memo(ForecastSummaryInner);

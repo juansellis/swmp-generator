@@ -136,6 +136,7 @@ export const WasteStreamPlanSchema = z.preprocess((val) => {
   on_site_management: z.string().optional().nullable(),
   destination: z.string().optional().nullable(),
   distance_km: z.number().min(0).optional().nullable(),
+  handling_mode: z.enum(["mixed", "separated"]).optional().default("mixed"),
 }));
 
 export const WasteStreamRowSchema = z.object({

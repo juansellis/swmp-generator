@@ -19,10 +19,15 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Notice } from "@/components/notice";
+import { AddressPicker, type AddressPickerValue } from "@/components/address-picker";
 
 export type QuickCreateProjectFormState = {
   name: string;
   address: string;
+  /** Set when user selects from Places Autocomplete; required to save. */
+  place_id?: string;
+  lat?: number;
+  lng?: number;
   region: string;
   projectType: string;
   projectTypeOther: string;
@@ -113,12 +118,28 @@ export function QuickCreateProjectModal({
           </div>
           <div className="grid gap-2">
             <Label>Site address *</Label>
-            <Input
+            <AddressPicker
               value={form.address}
-              onChange={(e) => setForm((s) => ({ ...s, address: e.target.value }))}
-              placeholder="e.g., 26 Hobson Street, Auckland CBD"
+              onChange={(v) =>
+                setForm((s) => ({
+                  ...s,
+                  address: v?.formatted_address ?? "",
+                  place_id: v?.place_id,
+                  lat: v?.lat,
+                  lng: v?.lng,
+                }))
+              }
+              onInput={(v) =>
+                setForm((s) => ({
+                  ...s,
+                  address: v,
+                  ...(v.trim() ? {} : { place_id: undefined, lat: undefined, lng: undefined }),
+                }))
+              }
+              placeholder="Search address…"
               disabled={loading}
             />
+            <p className="text-xs text-muted-foreground">Choose from suggestions to validate.</p>
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="grid gap-2">

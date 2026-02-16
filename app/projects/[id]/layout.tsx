@@ -28,6 +28,9 @@ export default function ProjectLayout({
     let mounted = true;
 
     (async () => {
+      if (process.env.NODE_ENV === "development") {
+        console.time("[perf] project load");
+      }
       setProjectLoading(true);
       setProjectError(null);
 
@@ -48,6 +51,9 @@ export default function ProjectLayout({
       setProject(projectRes.data as ProjectContextProject);
       setForecastCount(forecastCountVal ?? 0);
       setProjectLoading(false);
+      if (process.env.NODE_ENV === "development") {
+        console.timeEnd("[perf] project load");
+      }
     })();
 
     return () => {

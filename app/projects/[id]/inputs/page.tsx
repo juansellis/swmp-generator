@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
@@ -44,12 +44,14 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
+import { cn } from "@/lib/utils";
+import { AddressPicker, type AddressPickerValue } from "@/components/address-picker";
+import { AddressAutocomplete } from "@/components/address-autocomplete";
 import {
   ChevronDownIcon,
   ChevronUpIcon,
   XIcon,
   UploadIcon,
-  Loader2Icon,
   LayoutDashboard,
   Users,
   Building2,
@@ -64,6 +66,9 @@ type ProjectRow = {
   user_id: string;
   name: string;
   site_address?: string | null;
+  site_place_id?: string | null;
+  site_lat?: number | null;
+  site_lng?: number | null;
   address: string | null;
   region: string | null;
   project_type: string | null;
@@ -181,9 +186,15 @@ function buildDefaultPlanForStream(stream: string): WasteStreamPlanInput {
     category: stream,
     sub_material: null,
     intended_outcomes: getDefaultIntendedOutcomesForStream(stream),
+    destination_mode: "facility",
     partner_id: null,
     facility_id: null,
     destination_override: null,
+    custom_destination_name: null,
+    custom_destination_address: null,
+    custom_destination_place_id: null,
+    custom_destination_lat: null,
+    custom_destination_lng: null,
     partner: null,
     partner_overridden: false,
     pathway: `Segregate ${stream} where practical and send to an approved recycler/processor.`,
@@ -196,7 +207,9 @@ function buildDefaultPlanForStream(stream: string): WasteStreamPlanInput {
     on_site_management: null,
     destination: null,
     distance_km: null,
+    duration_min: null,
     waste_contractor_partner_id: null,
+    handling_mode: "mixed",
   };
 }
 
@@ -297,6 +310,7 @@ export default function ProjectInputsPage() {
   const [reportTitle, setReportTitle] = useState("");
   const [reportFooter, setReportFooter] = useState("");
   const [siteAddress, setSiteAddress] = useState("");
+  const [siteAddressValidated, setSiteAddressValidated] = useState<AddressPickerValue | null>(null);
   const [region, setRegion] = useState("");
   const [projectType, setProjectType] = useState("");
   const [projectTypeOther, setProjectTypeOther] = useState("");
@@ -349,6 +363,9 @@ export default function ProjectInputsPage() {
   const effectiveProjectType = projectType === "Other" ? projectTypeOther.trim() : projectType.trim();
   const requiredOk =
     siteAddress.trim().length > 0 &&
+    !!siteAddressValidated?.place_id &&
+    siteAddressValidated.lat != null &&
+    siteAddressValidated.lng != null &&
     region.trim().length > 0 &&
     effectiveProjectType.length > 0 &&
     startDate.trim().length > 0 &&
@@ -366,6 +383,9 @@ export default function ProjectInputsPage() {
   // Fetch catalog partners (DB-driven dropdown)
   useEffect(() => {
     let cancelled = false;
+    if (process.env.NODE_ENV === "development") {
+      console.time("[perf] streams/partners fetch");
+    }
     setCatalogPartnersLoading(true);
     fetch("/api/catalog/partners", { credentials: "include" })
       .then((r) => r.json())
@@ -377,6 +397,9 @@ export default function ProjectInputsPage() {
       .catch(() => {})
       .finally(() => {
         if (!cancelled) setCatalogPartnersLoading(false);
+        if (process.env.NODE_ENV === "development") {
+          console.timeEnd("[perf] streams/partners fetch");
+        }
       });
     return () => {
       cancelled = true;
@@ -445,9 +468,15 @@ export default function ProjectInputsPage() {
           category: stream,
           sub_material: null,
           intended_outcomes: ["Recycle"],
+          destination_mode: "facility" as const,
           partner_id: null,
           facility_id: null,
           destination_override: null,
+          custom_destination_name: null,
+          custom_destination_address: null,
+          custom_destination_place_id: null,
+          custom_destination_lat: null,
+          custom_destination_lng: null,
           partner: null,
           partner_overridden: false,
           pathway: `Segregate ${stream} where practical and send to an approved recycler/processor.`,
@@ -460,7 +489,9 @@ export default function ProjectInputsPage() {
           on_site_management: null,
           destination: null,
           distance_km: null,
+          duration_min: null,
           waste_contractor_partner_id: null,
+          handling_mode: "mixed" as const,
         };
       });
 
@@ -560,7 +591,6 @@ export default function ProjectInputsPage() {
   const [saveLoading, setSaveLoading] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [distanceLoadingStream, setDistanceLoadingStream] = useState<string | null>(null);
 
   const hazards = useMemo(() => {
     return {
@@ -589,7 +619,16 @@ export default function ProjectInputsPage() {
         setReportTitle(project.report_title ?? "");
         setReportFooter(project.report_footer_override ?? "");
         setProjectClientName(project.client_name ?? "");
-        setSiteAddress((project.site_address ?? project.address ?? "") as string);
+        const addr = (project.site_address ?? project.address ?? "") as string;
+        setSiteAddress(addr);
+        const pid = project.site_place_id ?? null;
+        const lat = project.site_lat ?? null;
+        const lng = project.site_lng ?? null;
+        setSiteAddressValidated(
+          pid && lat != null && lng != null
+            ? { formatted_address: addr, place_id: pid, lat: Number(lat), lng: Number(lng) }
+            : null
+        );
         setRegion(project.region ?? "");
         const pt = project.project_type ?? "";
         if (pt && !PROJECT_TYPE_OPTIONS.includes(pt)) {
@@ -625,7 +664,16 @@ export default function ProjectInputsPage() {
         setReportTitle(project.report_title ?? "");
         setReportFooter(project.report_footer_override ?? "");
         setProjectClientName(project.client_name ?? "");
-        setSiteAddress((project.site_address ?? project.address ?? "") as string);
+        const addr = (project.site_address ?? project.address ?? "") as string;
+        setSiteAddress(addr);
+        const pid = project.site_place_id ?? null;
+        const lat = project.site_lat ?? null;
+        const lng = project.site_lng ?? null;
+        setSiteAddressValidated(
+          pid && lat != null && lng != null
+            ? { formatted_address: addr, place_id: pid, lat: Number(lat), lng: Number(lng) }
+            : null
+        );
         setRegion(project.region ?? "");
         const pt = project.project_type ?? "";
         if (pt && !PROJECT_TYPE_OPTIONS.includes(pt)) {
@@ -766,43 +814,35 @@ export default function ProjectInputsPage() {
     return () => { cancelled = true; };
   }, [projectId]);
 
-  const updatePlan = (stream: string, patch: Partial<WasteStreamPlan>) =>
+  const updatePlan = useCallback((stream: string, patch: Partial<WasteStreamPlan>) => {
     setStreamPlans((prev) => prev.map((p) => (p.category === stream ? { ...p, ...patch } : p)));
+  }, []);
 
-  /** Destination address for distance automation: facility.address when facility selected, else destination_override. Blank if neither. */
-  function getDestinationAddressForPlan(plan: WasteStreamPlan): string {
-    const facility =
-      plan.partner_id && plan.facility_id
-        ? facilitiesByPartner[plan.partner_id]?.find((f) => f.id === plan.facility_id)
-        : null;
-    const fromFacility = (facility?.address ?? "").trim();
-    const fromOverride = (plan.destination_override ?? "").trim();
-    return fromFacility || fromOverride || "";
-  }
-
-  async function handleGetDistance(stream: string) {
-    const plan = streamPlans.find((p) => p.category === stream);
-    if (!plan) return;
-    const destinationAddress = getDestinationAddressForPlan(plan);
-    if (!destinationAddress.trim()) return; // Do not call API if destination is blank
-    setDistanceLoadingStream(stream);
-    try {
-      const res = await fetch("/api/distance", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          origin: siteAddress.trim(),
-          destination: destinationAddress,
-        }),
-      });
-      const data = await res.json();
-      if (res.ok && typeof data.distance_km === "number" && data.distance_km >= 0) {
-        updatePlan(stream, { distance_km: data.distance_km });
-      }
-    } finally {
-      setDistanceLoadingStream(null);
+  // Auto-save when destination (facility or custom) changes so distance recompute runs and UI updates without refresh.
+  const destinationSignatureRef = useRef<string>("");
+  const initialMountRef = useRef(true);
+  useEffect(() => {
+    const sig = JSON.stringify(
+      streamPlans.map((p) => ({
+        c: p.category,
+        mode: p.destination_mode,
+        fid: p.facility_id ?? "",
+        addr: p.custom_destination_address ?? "",
+        pid: p.custom_destination_place_id ?? "",
+      }))
+    );
+    if (initialMountRef.current) {
+      destinationSignatureRef.current = sig;
+      initialMountRef.current = false;
+      return;
     }
-  }
+    if (sig === destinationSignatureRef.current) return;
+    destinationSignatureRef.current = sig;
+    const t = window.setTimeout(() => {
+      handleSaveInputs({ preventDefault: () => {} } as React.FormEvent);
+    }, 1500);
+    return () => window.clearTimeout(t);
+  }, [streamPlans]);
 
   function toggleInList(value: string, list: string[], setList: (v: string[]) => void) {
     if (list.includes(value)) {
@@ -885,6 +925,9 @@ export default function ProjectInputsPage() {
       const plan = planByCategory.get(stream);
       const outcomesSet = (plan?.intended_outcomes?.length ?? 0) > 0;
       const destinationSet =
+        (plan?.destination_mode === "facility" && plan?.facility_id != null && plan.facility_id !== "") ||
+        (plan?.destination_mode === "custom" &&
+          ((plan?.custom_destination_address ?? "").trim() !== "" || (plan?.custom_destination_place_id ?? "").trim() !== "")) ||
         (plan?.facility_id != null && plan.facility_id !== "") ||
         ((plan?.destination_override ?? "").trim().length > 0) ||
         ((plan?.destination ?? "").trim().length > 0);
@@ -1048,6 +1091,43 @@ export default function ProjectInputsPage() {
         return;
       }
 
+      // Recompute distance for each stream plan that has a destination (facility or custom).
+      const plansWithDestination = streamPlans.filter((p) => {
+        if (p.destination_mode === "custom") {
+          return (
+            (p.custom_destination_address != null && String(p.custom_destination_address).trim() !== "") ||
+            (p.custom_destination_place_id != null && String(p.custom_destination_place_id).trim() !== "")
+          );
+        }
+        return p.facility_id != null && String(p.facility_id).trim() !== "";
+      });
+      const recomputeResults = await Promise.allSettled(
+        plansWithDestination.map((plan) =>
+          fetch(`/api/projects/${projectId}/streams/${encodeURIComponent(plan.category)}/distance/recompute`, {
+            method: "POST",
+            credentials: "include",
+          }).then((r) => (r.ok ? r.json() : Promise.reject(new Error("Recompute failed"))))
+        )
+      );
+      const byCategory = new Map(
+        plansWithDestination.map((p, i) => {
+          const result = recomputeResults[i];
+          const data = result.status === "fulfilled" ? result.value : null;
+          return [p.category, data] as const;
+        })
+      );
+      setStreamPlans((prev) =>
+        prev.map((p) => {
+          const data = byCategory.get(p.category);
+          if (!data) return p;
+          return {
+            ...p,
+            distance_km: data.distance_km ?? p.distance_km,
+            duration_min: data.duration_min ?? p.duration_min,
+          };
+        })
+      );
+
       const nextStatus = await fetchProjectStatusData(supabase, projectId);
       setProjectStatus(nextStatus);
       setLastSavedAt(new Date());
@@ -1164,7 +1244,20 @@ export default function ProjectInputsPage() {
                 <FieldGroup gridClassName="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                   <div className="space-y-2">
                     <Label>Site address *</Label>
-                    <Input value={siteAddress} onChange={(e) => setSiteAddress(e.target.value)} />
+                    <AddressPicker
+                      value={siteAddress}
+                      onChange={(v) => {
+                        setSiteAddressValidated(v);
+                        setSiteAddress(v?.formatted_address ?? "");
+                      }}
+                      onInput={(v) => {
+                        setSiteAddress(v);
+                        if (!v.trim()) setSiteAddressValidated(null);
+                      }}
+                      placeholder="Search address…"
+                      disabled={!!saveLoading}
+                    />
+                    <p className="text-xs text-muted-foreground">Choose from suggestions to validate.</p>
                   </div>
                   <div className="space-y-2">
                     <Label>Region *</Label>
@@ -1453,6 +1546,9 @@ export default function ProjectInputsPage() {
                       }
                       const missing: string[] = [];
                       if (!siteAddress.trim()) missing.push("Site address");
+                      if (!siteAddressValidated?.place_id || siteAddressValidated.lat == null || siteAddressValidated.lng == null) {
+                        missing.push("Site address (choose from map suggestions)");
+                      }
                       if (!region.trim()) missing.push("Region");
                       const ptSave = projectType === "Other" ? (projectTypeOther.trim() || "Other") : projectType.trim();
                       if (!ptSave) missing.push("Project type");
@@ -1464,11 +1560,33 @@ export default function ProjectInputsPage() {
                         setProjectSaveErr(`Please complete required fields: ${missing.join(", ")}`);
                         return;
                       }
+                      const placeId = siteAddressValidated!.place_id!.trim();
+                      const validateRes = await fetch("/api/validate-address", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ place_id: placeId }),
+                      });
+                      if (!validateRes.ok) {
+                        const errBody = await validateRes.json().catch(() => ({}));
+                        setProjectSaveErr(
+                          (errBody as { error?: string }).error ?? "Address validation failed. Please reselect the address."
+                        );
+                        return;
+                      }
+                      const validated = (await validateRes.json()) as {
+                        formatted_address: string;
+                        place_id: string;
+                        lat: number;
+                        lng: number;
+                      };
                       const { error } = await supabase
                         .from("projects")
                         .update({
-                          site_address: siteAddress.trim(),
-                          address: siteAddress.trim(),
+                          site_address: validated.formatted_address,
+                          site_place_id: validated.place_id,
+                          site_lat: validated.lat,
+                          site_lng: validated.lng,
+                          address: validated.formatted_address,
                           region: region.trim(),
                           project_type: ptSave,
                           start_date: startDate,
@@ -1481,6 +1599,35 @@ export default function ProjectInputsPage() {
                       if (error) {
                         setProjectSaveErr(error.message);
                         return;
+                      }
+                      setSiteAddress(validated.formatted_address);
+                      setSiteAddressValidated({
+                        formatted_address: validated.formatted_address,
+                        place_id: validated.place_id,
+                        lat: validated.lat,
+                        lng: validated.lng,
+                      });
+                      setProject((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              site_address: validated.formatted_address,
+                              site_place_id: validated.place_id,
+                              site_lat: validated.lat,
+                              site_lng: validated.lng,
+                              address: validated.formatted_address,
+                            }
+                          : null
+                      );
+                      if (projectContext?.project?.id === projectId) {
+                        projectContext.setProject({
+                          ...projectContext.project,
+                          site_address: validated.formatted_address,
+                          site_place_id: validated.place_id,
+                          site_lat: validated.lat,
+                          site_lng: validated.lng,
+                          address: validated.formatted_address,
+                        });
                       }
                       setProjectSaveMsg("Saved project details.");
                     }}
@@ -1751,7 +1898,12 @@ export default function ProjectInputsPage() {
             </div>
 
             <div className="mt-6">
-              <Label className="mb-3 block font-semibold">Waste stream plans (detailed)</Label>
+              <div className="mb-3 flex items-center gap-2">
+                <Label className="block font-semibold">Waste stream plans (detailed)</Label>
+                {saveLoading && (
+                  <span className="text-xs text-muted-foreground" aria-live="polite">Saving…</span>
+                )}
+              </div>
               <p className="text-sm text-muted-foreground mb-4">
                 One plan card per selected stream. Select Partner (company) and Facility (site), or choose Other and enter a custom destination.
               </p>
@@ -1816,9 +1968,15 @@ export default function ProjectInputsPage() {
                       setStreamPlans((prev) =>
                         prev.map((p) => ({
                           ...p,
+                          destination_mode: src.destination_mode ?? "facility",
                           partner_id: src.partner_id ?? null,
                           facility_id: src.facility_id ?? null,
                           destination_override: src.destination_override ?? null,
+                          custom_destination_name: src.custom_destination_name ?? null,
+                          custom_destination_address: src.custom_destination_address ?? null,
+                          custom_destination_place_id: src.custom_destination_place_id ?? null,
+                          custom_destination_lat: src.custom_destination_lat ?? null,
+                          custom_destination_lng: src.custom_destination_lng ?? null,
                           partner: src.partner ?? null,
                           partner_overridden: true,
                         }))
@@ -1859,7 +2017,12 @@ export default function ProjectInputsPage() {
                         const plan = streamPlans.find((p) => p.category === stream);
                         const partner = plan?.partner_id ? catalogPartners.find((p) => p.id === plan.partner_id) : null;
                         const facility = plan?.partner_id && plan?.facility_id ? facilitiesByPartner[plan.partner_id]?.find((f) => f.id === plan.facility_id) : null;
-                        const dest = facility ? (partner?.name ?? "") + " – " + (facility as { name?: string }).name : (plan?.destination_override ?? "—");
+                        const dest =
+                          facility
+                            ? (partner?.name ?? "") + " – " + (facility as { name?: string }).name
+                            : plan?.destination_mode === "custom"
+                              ? (plan?.custom_destination_name ?? plan?.custom_destination_address ?? "").trim() || "—"
+                              : (plan?.destination_override ?? "—");
                         const manualTonnes = plan?.manual_qty_tonnes ?? (plan ? planManualQtyToTonnes(plan, stream) : null) ?? 0;
                         const forecastTonnes = plan?.forecast_qty != null && plan.forecast_qty >= 0 ? plan.forecast_qty : 0;
                         const totalTonnes = manualTonnes + forecastTonnes;
@@ -1901,9 +2064,15 @@ export default function ProjectInputsPage() {
                         category: stream,
                         sub_material: null,
                         intended_outcomes: ["Recycle"],
+                        destination_mode: "facility",
                         partner_id: null,
                         facility_id: null,
                         destination_override: null,
+                        custom_destination_name: null,
+                        custom_destination_address: null,
+                        custom_destination_place_id: null,
+                        custom_destination_lat: null,
+                        custom_destination_lng: null,
                         partner: null,
                         partner_overridden: false,
                         pathway: `Segregate ${stream} where practical and send to an approved recycler/processor.`,
@@ -1916,10 +2085,12 @@ export default function ProjectInputsPage() {
                         on_site_management: null,
                         destination: null,
                         distance_km: null,
+                        duration_min: null,
                         waste_contractor_partner_id: null,
                         manual_qty_tonnes: null,
                         forecast_qty: null,
                         forecast_unit: "tonne",
+                        handling_mode: "mixed",
                       } as WasteStreamPlan);
 
                     const expanded = expandedStreamPlans[stream] ?? false;
@@ -1941,7 +2112,9 @@ export default function ProjectInputsPage() {
                     const summaryDestination =
                       facilityName !== ""
                         ? (resolvedPartner?.name ? `${resolvedPartner.name} – ${facilityName}` : facilityName)
-                        : (safePlan.destination_override ?? (safePlan.destination ?? "").trim()) || titlePartnerName || "—";
+                        : safePlan.destination_mode === "custom"
+                          ? (safePlan.custom_destination_name ?? safePlan.custom_destination_address ?? "").trim() || titlePartnerName || "—"
+                          : (safePlan.destination_override ?? (safePlan.destination ?? "").trim()) || titlePartnerName || "—";
                     const summaryDestinationTruncated =
                       summaryDestination.length > 50 ? `${summaryDestination.slice(0, 47)}…` : summaryDestination;
 
@@ -2002,6 +2175,38 @@ export default function ProjectInputsPage() {
 
                         {expanded && (
                           <div className="space-y-4 pt-3 border-t">
+                            <div className="grid gap-2">
+                              <Label>Handling</Label>
+                              <p className="text-xs text-muted-foreground">
+                                Mixed = co-mingled / Separated = source-separated onsite
+                              </p>
+                              <div className="flex rounded-lg border bg-muted/30 p-0.5 w-fit">
+                                {(["mixed", "separated"] as const).map((mode) => {
+                                  const isActive = (safePlan.handling_mode ?? "mixed") === mode;
+                                  return (
+                                    <button
+                                      key={mode}
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        updatePlan(stream, { handling_mode: mode });
+                                        setTimeout(() => {
+                                          handleSaveInputs({ preventDefault: () => {} } as React.FormEvent);
+                                        }, 100);
+                                      }}
+                                      className={cn(
+                                        "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+                                        isActive
+                                          ? "bg-background text-foreground shadow-sm"
+                                          : "text-muted-foreground hover:text-foreground"
+                                      )}
+                                    >
+                                      {mode === "mixed" ? "Mixed" : "Separated"}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
                             <div className="grid gap-4 sm:grid-cols-2">
                               <div className="grid gap-2">
                                 <Label>Sub-material (optional)</Label>
@@ -2065,97 +2270,175 @@ export default function ProjectInputsPage() {
                             </div>
 
                             <div className="grid gap-2">
-                              <Label>Partner (company)</Label>
+                              <Label>Destination</Label>
                               <Select
-                                value={safePlan.partner_id != null && safePlan.partner_id !== "" ? String(safePlan.partner_id) : "other"}
+                                value={safePlan.destination_mode === "custom" ? "custom" : "facility"}
                                 onValueChange={(v) => {
-                                  const partnerId = v === "other" || v === "" ? null : v;
-                                  console.log("selectedPartnerId", partnerId, typeof partnerId);
-                                  // Partner (company) is the override: same selection drives destination and contractor for this stream
+                                  const mode = v === "custom" ? "custom" : "facility";
                                   updatePlan(stream, {
-                                    partner_id: partnerId,
-                                    facility_id: null,
-                                    partner: null,
-                                    partner_overridden: true,
-                                    waste_contractor_partner_id: partnerId,
+                                    destination_mode: mode,
+                                    ...(mode === "facility"
+                                      ? {
+                                          facility_id: safePlan.facility_id,
+                                          custom_destination_name: null,
+                                          custom_destination_address: null,
+                                          custom_destination_place_id: null,
+                                          custom_destination_lat: null,
+                                          custom_destination_lng: null,
+                                          destination_override: null,
+                                        }
+                                      : {
+                                          facility_id: null,
+                                          partner_id: null,
+                                          destination_override: null,
+                                        }),
                                   });
-                                  if (partnerId) {
-                                    loadFacilitiesForPartner(partnerId);
+                                  if (mode === "facility" && safePlan.partner_id) {
+                                    loadFacilitiesForPartner(safePlan.partner_id);
                                   }
                                 }}
-                                disabled={saveLoading || catalogPartnersLoading}
+                                disabled={saveLoading}
                               >
                                 <SelectTrigger className="w-full bg-background">
-                                  <SelectValue placeholder={catalogPartnersLoading ? "Loading…" : "Select partner"} />
+                                  <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
-                                  <SelectItem value="other">Other</SelectItem>
-                                  {catalogPartners.map((pr) => (
-                                    <SelectItem key={pr.id} value={String(pr.id)}>
-                                      {pr.name}
-                                    </SelectItem>
-                                  ))}
-                                  {!catalogPartnersLoading && catalogPartners.length === 0 && (
-                                    <div className="px-2 py-1.5 text-sm text-muted-foreground">
-                                      No partners in catalog. Add partners in Admin.
-                                    </div>
-                                  )}
+                                  <SelectItem value="facility">Facility</SelectItem>
+                                  <SelectItem value="custom">Custom destination</SelectItem>
                                 </SelectContent>
                               </Select>
                             </div>
 
-                            {safePlan.partner_id != null && safePlan.partner_id !== "" && (() => {
-                              const partnerKey = String(safePlan.partner_id).trim();
-                              const facilityList = facilitiesByPartner[partnerKey] ?? [];
-                              const isLoading = !!facilitiesLoadingByPartner[partnerKey];
-                              return (
-                              <div className="grid gap-2">
-                                <Label>Facility (site)</Label>
-                                <Select
-                                  value={safePlan.facility_id ?? "none"}
-                                  onValueChange={(v) => {
-                                    const facilityId = v === "none" || v === "" ? null : v;
-                                    updatePlan(stream, { facility_id: facilityId });
-                                  }}
-                                  disabled={saveLoading || isLoading}
-                                >
-                                  <SelectTrigger className="w-full bg-background">
-                                    <SelectValue
-                                      placeholder={
-                                        isLoading
-                                          ? "Loading…"
-                                          : "Select facility"
+                            {safePlan.destination_mode !== "custom" && (
+                              <>
+                                <div className="grid gap-2">
+                                  <Label>Partner (company)</Label>
+                                  <Select
+                                    value={safePlan.partner_id != null && safePlan.partner_id !== "" ? String(safePlan.partner_id) : "other"}
+                                    onValueChange={(v) => {
+                                      const partnerId = v === "other" || v === "" ? null : v;
+                                      updatePlan(stream, {
+                                        partner_id: partnerId,
+                                        facility_id: null,
+                                        partner: null,
+                                        partner_overridden: true,
+                                        waste_contractor_partner_id: partnerId,
+                                      });
+                                      if (partnerId) {
+                                        loadFacilitiesForPartner(partnerId);
                                       }
-                                    />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="none">— Not selected —</SelectItem>
-                                    {facilityList.map((f) => (
-                                      <SelectItem key={f.id} value={String(f.id)}>
-                                        {f.name}
-                                      </SelectItem>
-                                    ))}
-                                    {!isLoading && facilityList.length === 0 && (
-                                      <div className="px-2 py-1.5 text-sm text-muted-foreground">
-                                        No facilities found for this partner. Add facilities in Admin.
-                                      </div>
-                                    )}
-                                  </SelectContent>
-                                </Select>
-                              </div>
-                            ); })()}
+                                    }}
+                                    disabled={saveLoading || catalogPartnersLoading}
+                                  >
+                                    <SelectTrigger className="w-full bg-background">
+                                      <SelectValue placeholder={catalogPartnersLoading ? "Loading…" : "Select partner"} />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="other">Other</SelectItem>
+                                      {catalogPartners.map((pr) => (
+                                        <SelectItem key={pr.id} value={String(pr.id)}>
+                                          {pr.name}
+                                        </SelectItem>
+                                      ))}
+                                      {!catalogPartnersLoading && catalogPartners.length === 0 && (
+                                        <div className="px-2 py-1.5 text-sm text-muted-foreground">
+                                          No partners in catalog. Add partners in Admin.
+                                        </div>
+                                      )}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                                {safePlan.partner_id != null && safePlan.partner_id !== "" && (() => {
+                                  const partnerKey = String(safePlan.partner_id).trim();
+                                  const facilityList = facilitiesByPartner[partnerKey] ?? [];
+                                  const isLoading = !!facilitiesLoadingByPartner[partnerKey];
+                                  return (
+                                    <div className="grid gap-2">
+                                      <Label>Facility (site)</Label>
+                                      <Select
+                                        value={safePlan.facility_id ?? "none"}
+                                        onValueChange={(v) => {
+                                          const facilityId = v === "none" || v === "" ? null : v;
+                                          updatePlan(stream, { facility_id: facilityId });
+                                        }}
+                                        disabled={saveLoading || isLoading}
+                                      >
+                                        <SelectTrigger className="w-full bg-background">
+                                          <SelectValue
+                                            placeholder={
+                                              isLoading ? "Loading…" : "Select facility"
+                                            }
+                                          />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          <SelectItem value="none">— Not selected —</SelectItem>
+                                          {facilityList.map((f) => (
+                                            <SelectItem key={f.id} value={String(f.id)}>
+                                              {f.name}
+                                            </SelectItem>
+                                          ))}
+                                          {!isLoading && facilityList.length === 0 && (
+                                            <div className="px-2 py-1.5 text-sm text-muted-foreground">
+                                              No facilities found for this partner. Add facilities in Admin.
+                                            </div>
+                                          )}
+                                        </SelectContent>
+                                      </Select>
+                                    </div>
+                                  );
+                                })()}
+                              </>
+                            )}
 
-                            {(safePlan.partner_id == null || safePlan.partner_id === "" || safePlan.facility_id == null || safePlan.facility_id === "") && (
-                              <div className="grid gap-2">
-                                <Label>Custom destination</Label>
-                                <Textarea
-                                  value={safePlan.destination_override ?? ""}
-                                  onChange={(e) => updatePlan(stream, { destination_override: e.target.value || null })}
-                                  placeholder="e.g. Approved recycler / landfill"
-                                  rows={2}
-                                  disabled={saveLoading}
-                                />
-                              </div>
+                            {safePlan.destination_mode === "custom" && (
+                              <>
+                                <div className="grid gap-2">
+                                  <Label>Custom destination name (required)</Label>
+                                  <Input
+                                    value={safePlan.custom_destination_name ?? ""}
+                                    onChange={(e) =>
+                                      updatePlan(stream, {
+                                        custom_destination_name: e.target.value.trim() || null,
+                                      })
+                                    }
+                                    placeholder="e.g. Approved recycler / landfill"
+                                    disabled={saveLoading}
+                                  />
+                                </div>
+                                <div className="grid gap-2">
+                                  <Label>Custom destination address (required)</Label>
+                                  <AddressAutocomplete
+                                    value={safePlan.custom_destination_address ?? ""}
+                                    onInput={(value) =>
+                                      updatePlan(stream, {
+                                        custom_destination_address: value.trim() || null,
+                                        custom_destination_place_id: null,
+                                        custom_destination_lat: null,
+                                        custom_destination_lng: null,
+                                      })
+                                    }
+                                    onChange={(value) => {
+                                      if (value) {
+                                        updatePlan(stream, {
+                                          custom_destination_address: value.formatted_address,
+                                          custom_destination_place_id: value.place_id,
+                                          custom_destination_lat: value.lat,
+                                          custom_destination_lng: value.lng,
+                                        });
+                                      } else {
+                                        updatePlan(stream, {
+                                          custom_destination_address: null,
+                                          custom_destination_place_id: null,
+                                          custom_destination_lat: null,
+                                          custom_destination_lng: null,
+                                        });
+                                      }
+                                    }}
+                                    placeholder="Search address…"
+                                    disabled={saveLoading}
+                                  />
+                                </div>
+                              </>
                             )}
 
                             <div className="grid gap-2">
@@ -2390,57 +2673,20 @@ export default function ProjectInputsPage() {
 
                             <div className="grid gap-2">
                               <Label>Distance to destination (km)</Label>
-                              <div className="flex gap-2 items-center">
-                                <Input
-                                  type="number"
-                                  min={0}
-                                  step="0.1"
-                                  value={
-                                    safePlan.distance_km != null && safePlan.distance_km >= 0
-                                      ? safePlan.distance_km
-                                      : ""
-                                  }
-                                  onChange={(e) => {
-                                    const v = e.target.value;
-                                    const n = v === "" ? null : Number(v);
-                                    setStreamPlans((prev) =>
-                                      prev.map((p) =>
-                                        p.category === stream
-                                          ? {
-                                              ...p,
-                                              distance_km:
-                                                n != null && !Number.isNaN(n) && n >= 0
-                                                  ? n
-                                                  : null,
-                                            }
-                                          : p
-                                      )
-                                    );
-                                  }}
-                                  placeholder="0"
-                                  disabled={saveLoading}
-                                  className="max-w-[120px]"
-                                />
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  size="sm"
-                                  disabled={
-                                    saveLoading ||
-                                    !getDestinationAddressForPlan(safePlan).trim() ||
-                                    distanceLoadingStream === stream
-                                  }
-                                  onClick={() => handleGetDistance(stream)}
-                                >
-                                  {distanceLoadingStream === stream ? (
-                                    <Loader2Icon className="size-4 animate-spin" />
-                                  ) : (
-                                    "Get distance"
-                                  )}
-                                </Button>
-                              </div>
+                              <p className="text-sm tabular-nums text-muted-foreground">
+                                {safePlan.distance_km != null && safePlan.distance_km >= 0 ? (
+                                  <>
+                                    {safePlan.distance_km} km
+                                    {safePlan.duration_min != null && safePlan.duration_min >= 0
+                                      ? ` (${Math.round(safePlan.duration_min)} min)`
+                                      : ""}
+                                  </>
+                                ) : (
+                                  "—"
+                                )}
+                              </p>
                               <p className="text-xs text-muted-foreground">
-                                Destination for distance: selected facility address, or custom destination. Leave blank to skip lookup; you can always enter distance manually.
+                                Computed from project site to destination. Save after changing facility or custom destination to update.
                               </p>
                             </div>
 

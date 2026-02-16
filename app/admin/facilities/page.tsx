@@ -34,6 +34,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
+import { AddressPicker, type AddressPickerValue } from "@/components/address-picker";
 
 type PartnerRow = { id: string; name: string };
 type FacilityRow = {
@@ -44,10 +45,45 @@ type FacilityRow = {
   region: string;
   accepted_streams: string[];
   address: string | null;
+  place_id: string | null;
+  lat: number | null;
+  lng: number | null;
 };
 
 const FACILITY_TYPE_OPTIONS = ["Recycler", "Transfer station", "Processor", "Cleanfill", "Other"];
 const REGION_OPTIONS = ["Auckland", "Wellington", "Christchurch", "Hamilton/Waikato", "Tauranga/BOP", "Dunedin/Otago", "Other (NZ)"];
+
+/** Keywords for "Common" quick-select (case-insensitive match against stream label). */
+const COMMON_STREAM_KEYWORDS = [
+  "Mixed C&D",
+  "Timber",
+  "Metal",
+  "Plasterboard",
+  "Cardboard",
+  "Concrete",
+  "Glass",
+  "Soft plastic",
+];
+
+/** Keywords for "Recyclables-only" quick-select. */
+const RECYCLABLES_STREAM_KEYWORDS = [
+  "Metal",
+  "Cardboard",
+  "Glass",
+  "Plasterboard",
+  "Timber",
+  "Soft plastic",
+  "Hard plastic",
+  "Mixed C&D",
+];
+
+function streamsMatchingKeywords(streamLabels: string[], keywords: string[]): string[] {
+  const lower = (s: string) => s.toLowerCase();
+  const keyLower = keywords.map(lower);
+  return streamLabels.filter((label) =>
+    keyLower.some((kw) => lower(label).includes(kw))
+  );
+}
 
 export default function AdminFacilitiesPage() {
   const [facilities, setFacilities] = useState<FacilityRow[]>([]);
@@ -64,13 +100,16 @@ export default function AdminFacilitiesPage() {
     facility_type: "",
     region: "",
     address: "",
+    place_id: "" as string | undefined,
+    lat: undefined as number | undefined,
+    lng: undefined as number | undefined,
     accepted_streams: [] as string[],
   });
 
   const fetchFacilities = async () => {
     const { data, error: e } = await supabase
       .from("facilities")
-      .select("id, partner_id, name, facility_type, region, accepted_streams, address")
+      .select("id, partner_id, name, facility_type, region, accepted_streams, address, place_id, lat, lng")
       .order("region")
       .order("name");
     if (e) {
@@ -102,6 +141,9 @@ export default function AdminFacilitiesPage() {
       facility_type: "",
       region: "",
       address: "",
+      place_id: undefined,
+      lat: undefined,
+      lng: undefined,
       accepted_streams: [],
     });
     setEditing(null);
@@ -114,6 +156,9 @@ export default function AdminFacilitiesPage() {
       facility_type: f.facility_type ?? "",
       region: f.region ?? "",
       address: f.address ?? "",
+      place_id: f.place_id ?? undefined,
+      lat: f.lat ?? undefined,
+      lng: f.lng ?? undefined,
       accepted_streams: f.accepted_streams ?? [],
     });
     setEditing(f);
@@ -133,14 +178,34 @@ export default function AdminFacilitiesPage() {
       toast.error("Partner is required");
       return;
     }
+    if (!form.place_id || form.lat == null || form.lng == null) {
+      toast.error("Address: choose from suggestions to validate.");
+      return;
+    }
     setSaving(true);
+    const validateRes = await fetch("/api/validate-address", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ place_id: form.place_id }),
+    });
+    if (!validateRes.ok) {
+      const err = await validateRes.json();
+      toast.error(err?.error ?? "Address validation failed.");
+      setSaving(false);
+      return;
+    }
+    const serverAddress = (await validateRes.json()) as { formatted_address: string; place_id: string; lat: number; lng: number };
     const payload = {
       partner_id: form.partner_id,
       name: form.name.trim(),
       facility_type: form.facility_type.trim() || null,
       region: form.region.trim() || null,
       accepted_streams: form.accepted_streams,
-      address: form.address.trim() || null,
+      address: serverAddress.formatted_address,
+      place_id: serverAddress.place_id,
+      lat: serverAddress.lat,
+      lng: serverAddress.lng,
       updated_at: new Date().toISOString(),
     };
     if (modalOpen === "create") {
@@ -190,6 +255,29 @@ export default function AdminFacilitiesPage() {
       accepted_streams: prev.accepted_streams.includes(s)
         ? prev.accepted_streams.filter((x) => x !== s)
         : [...prev.accepted_streams, s],
+    }));
+  };
+
+  const streamLabels = STREAM_LABELS;
+  const selectedCount = form.accepted_streams.length;
+  const totalCount = streamLabels.length;
+
+  const selectAllStreams = () => {
+    setForm((prev) => ({ ...prev, accepted_streams: [...streamLabels] }));
+  };
+  const selectNoStreams = () => {
+    setForm((prev) => ({ ...prev, accepted_streams: [] }));
+  };
+  const selectCommonStreams = () => {
+    setForm((prev) => ({
+      ...prev,
+      accepted_streams: streamsMatchingKeywords(streamLabels, COMMON_STREAM_KEYWORDS),
+    }));
+  };
+  const selectRecyclablesStreams = () => {
+    setForm((prev) => ({
+      ...prev,
+      accepted_streams: streamsMatchingKeywords(streamLabels, RECYCLABLES_STREAM_KEYWORDS),
     }));
   };
 
@@ -269,7 +357,23 @@ export default function AdminFacilitiesPage() {
       </Card>
 
       <Dialog open={modalOpen === "create" || modalOpen === "edit"} onOpenChange={(open) => !open && setModalOpen(null)}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogContent
+          className="max-w-lg max-h-[90vh] overflow-y-auto"
+          onInteractOutside={(e) => {
+            const t = e.target as HTMLElement | null;
+            if (!t) return;
+            if (t.closest(".pac-container")) {
+              e.preventDefault();
+            }
+          }}
+          onPointerDownOutside={(e) => {
+            const t = e.target as HTMLElement | null;
+            if (!t) return;
+            if (t.closest(".pac-container")) {
+              e.preventDefault();
+            }
+          }}
+        >
           <DialogHeader>
             <DialogTitle>{editing ? "Edit facility" : "Add facility"}</DialogTitle>
             <DialogDescription>Facility (site) details. Name and partner are required.</DialogDescription>
@@ -323,18 +427,51 @@ export default function AdminFacilitiesPage() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="grid gap-2">
-              <Label>Address</Label>
-              <Input
+            <div className="relative overflow-visible grid gap-2">
+              <Label>Address *</Label>
+              <AddressPicker
                 value={form.address}
-                onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))}
-                placeholder="e.g. 123 Example Rd, Auckland"
+                onChange={(v) =>
+                  setForm((f) => ({
+                    ...f,
+                    address: v?.formatted_address ?? "",
+                    place_id: v?.place_id,
+                    lat: v?.lat,
+                    lng: v?.lng,
+                  }))
+                }
+                onInput={(v) =>
+                  setForm((f) => ({
+                    ...f,
+                    address: v,
+                    ...(v.trim() ? {} : { place_id: undefined, lat: undefined, lng: undefined }),
+                  }))
+                }
+                placeholder="Search address…"
               />
+              <p className="text-xs text-muted-foreground">Choose from suggestions to validate.</p>
             </div>
             <div className="grid gap-2">
               <Label>Accepted streams</Label>
+              <p className="text-xs text-muted-foreground">
+                Selected: {selectedCount} / {totalCount}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" variant="outline" size="sm" onClick={selectAllStreams}>
+                  Select all
+                </Button>
+                <Button type="button" variant="outline" size="sm" onClick={selectNoStreams}>
+                  Select none
+                </Button>
+                <Button type="button" variant="outline" size="sm" onClick={selectCommonStreams}>
+                  Quick select: Common
+                </Button>
+                <Button type="button" variant="outline" size="sm" onClick={selectRecyclablesStreams}>
+                  Recyclables only
+                </Button>
+              </div>
               <div className="border rounded-md p-3 max-h-48 overflow-y-auto space-y-2">
-                {STREAM_LABELS.map((s) => (
+                {streamLabels.map((s) => (
                   <div key={s} className="flex items-center gap-2">
                     <Checkbox
                       id={`stream-${s}`}
