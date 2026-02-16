@@ -133,8 +133,8 @@ export async function POST(_req: Request, { params }: Params) {
   const customAddress =
     (plan.custom_destination_address != null && String(plan.custom_destination_address).trim())
       ? String(plan.custom_destination_address).trim()
-      : (plan.destination_override ?? plan.destination ?? "").trim();
-  const customName = (plan.custom_destination_name ?? "").trim() || customAddress || null;
+      : String(plan.destination_override ?? plan.destination ?? "").trim();
+  const customName = String(plan.custom_destination_name ?? "").trim() || customAddress || null;
 
   if (customPlaceId && destLat != null && destLng != null && Number.isFinite(destLat) && Number.isFinite(destLng)) {
     // use stored custom destination coords
