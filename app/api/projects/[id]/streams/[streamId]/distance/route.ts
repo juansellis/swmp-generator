@@ -89,7 +89,7 @@ export async function GET(_req: Request, { params }: Params) {
   const customPlaceId = plan.custom_destination_place_id != null && String(plan.custom_destination_place_id).trim()
     ? String(plan.custom_destination_place_id).trim()
     : null;
-  const customAddress = (plan.custom_destination_address ?? plan.destination_override ?? plan.destination ?? "").trim();
+  const customAddress = String(plan.custom_destination_address ?? plan.destination_override ?? plan.destination ?? "").trim();
   const placeIdForLookup = customPlaceId || (customAddress ? `geocoded:${encodeURIComponent(customAddress)}` : null);
 
   if (!placeIdForLookup) {
