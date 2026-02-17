@@ -88,6 +88,7 @@ function streamsMatchingKeywords(streamLabels: string[], keywords: string[]): st
 export default function AdminFacilitiesPage() {
   const [facilities, setFacilities] = useState<FacilityRow[]>([]);
   const [partners, setPartners] = useState<PartnerRow[]>([]);
+  const [streamLabels, setStreamLabels] = useState<string[]>(STREAM_LABELS);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState<"create" | "edit" | "delete" | null>(null);
@@ -129,6 +130,16 @@ export default function AdminFacilitiesPage() {
     (async () => {
       setLoading(true);
       setError(null);
+      try {
+        const res = await fetch("/api/catalog/waste-streams");
+        if (res.ok) {
+          const data = await res.json();
+          const names = (data.waste_streams ?? []).map((w: { name: string }) => w.name);
+          if (names.length > 0) setStreamLabels(names);
+        }
+      } catch {
+        // keep STREAM_LABELS fallback
+      }
       await Promise.all([fetchFacilities(), fetchPartners()]);
       setLoading(false);
     })();
@@ -258,7 +269,6 @@ export default function AdminFacilitiesPage() {
     }));
   };
 
-  const streamLabels = STREAM_LABELS;
   const selectedCount = form.accepted_streams.length;
   const totalCount = streamLabels.length;
 

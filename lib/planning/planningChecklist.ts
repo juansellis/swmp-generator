@@ -4,7 +4,7 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { calcWasteQty, toWasteKg } from "@/lib/forecastApi";
+import { calcWasteQty, getConversionOptions, toWasteKg } from "@/lib/forecastApi";
 import { normalizeSwmpInputs, SWMP_INPUTS_JSON_COLUMN } from "@/lib/swmp/schema";
 import { buildWasteStrategy } from "./wasteStrategyBuilder";
 import type { StreamPlanItem } from "./wasteStrategyBuilder";
@@ -44,11 +44,14 @@ async function getForecastCounts(
   supabase: SupabaseClient,
   projectId: string
 ): Promise<ForecastCounts> {
-  const { data: rows, error } = await supabase
-    .from("project_forecast_items")
-    .select("quantity, excess_percent, unit, kg_per_m, waste_stream_key")
-    .eq("project_id", projectId);
-
+  const [conversionMap, itemsResult] = await Promise.all([
+    getConversionOptions(supabase),
+    supabase
+      .from("project_forecast_items")
+      .select("quantity, excess_percent, unit, kg_per_m, waste_stream_key")
+      .eq("project_id", projectId),
+  ]);
+  const { data: rows, error } = itemsResult;
   if (error) return { unallocated_count: 0, conversion_required_count: 0, total_count: 0 };
   const raw = (rows ?? []) as {
     quantity: number;
@@ -64,10 +67,11 @@ async function getForecastCounts(
       row.waste_stream_key != null && String(row.waste_stream_key).trim() !== ""
         ? String(row.waste_stream_key).trim()
         : null;
+    const streamOpts = streamKey ? conversionMap.get(streamKey) : undefined;
+    const kgPerM = row.kg_per_m != null && Number.isFinite(Number(row.kg_per_m)) ? Number(row.kg_per_m) : (streamOpts?.kgPerM ?? null);
+    const densityKgM3 = streamOpts?.densityKgM3 ?? null;
     const wasteQty = calcWasteQty(Number(row.quantity) ?? 0, Number(row.excess_percent) ?? 0);
-    const wasteKg = toWasteKg(wasteQty, (row.unit ?? "tonne").toString(), {
-      kgPerM: row.kg_per_m != null && Number.isFinite(Number(row.kg_per_m)) ? Number(row.kg_per_m) : null,
-    });
+    const wasteKg = toWasteKg(wasteQty, (row.unit ?? "tonne").toString(), { kgPerM, densityKgM3 });
     if (!streamKey) unallocated += 1;
     else if (wasteKg == null || !Number.isFinite(wasteKg)) conversionRequired += 1;
   }

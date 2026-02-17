@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { calcWasteKg, calcWasteQty, syncForecastAllocationToInputs } from "@/lib/forecastApi";
+import { calcWasteKg, calcWasteQty, getConversionOptions, syncForecastAllocationToInputs } from "@/lib/forecastApi";
 
 type ItemIdParams = { params: Promise<{ itemId: string }> };
 
@@ -43,7 +43,7 @@ async function requireForecastItemAccess(itemId: string) {
 /**
  * PATCH /api/forecast-items/:itemId
  * Update a forecast item. Recomputes computed_waste_qty, syncs allocation, returns item + stream totals.
- * Body: partial { item_name, quantity, unit, excess_percent, material_type, material_type_id, waste_stream_key }
+ * Body: partial { item_name, quantity, unit, excess_percent, kg_per_m, density_kg_m3, allocated_stream_id, waste_stream_key }
  */
 export async function PATCH(req: Request, { params }: ItemIdParams) {
   const { itemId } = await params;
@@ -57,8 +57,8 @@ export async function PATCH(req: Request, { params }: ItemIdParams) {
     unit?: string;
     excess_percent?: number;
     kg_per_m?: number | null;
-    material_type?: string | null;
-    material_type_id?: string | null;
+    density_kg_m3?: number | null;
+    allocated_stream_id?: string | null;
     waste_stream_key?: string | null;
   };
   try {
@@ -69,7 +69,7 @@ export async function PATCH(req: Request, { params }: ItemIdParams) {
 
   const { data: existing, error: fetchErr } = await supabase
     .from("project_forecast_items")
-    .select("quantity, excess_percent, unit, kg_per_m, item_name, material_type, material_type_id, waste_stream_key")
+    .select("quantity, excess_percent, unit, kg_per_m, density_kg_m3, item_name, allocated_stream_id, waste_stream_key")
     .eq("id", itemId)
     .single();
 
@@ -77,8 +77,19 @@ export async function PATCH(req: Request, { params }: ItemIdParams) {
     return NextResponse.json({ error: "Forecast item not found" }, { status: 404 });
   }
 
-  const quantity = body.quantity !== undefined ? Number(body.quantity) : Number(existing.quantity);
-  const excess_percent = body.excess_percent !== undefined ? Number(body.excess_percent) : Number(existing.excess_percent);
+  const existingRow = existing as {
+    quantity: number;
+    excess_percent: number;
+    unit: string;
+    kg_per_m: number | null;
+    density_kg_m3: number | null;
+    item_name: string;
+    allocated_stream_id: string | null;
+    waste_stream_key: string | null;
+  };
+
+  const quantity = body.quantity !== undefined ? Number(body.quantity) : Number(existingRow.quantity);
+  const excess_percent = body.excess_percent !== undefined ? Number(body.excess_percent) : Number(existingRow.excess_percent);
   if (!Number.isNaN(quantity) && quantity < 0) {
     return NextResponse.json({ error: "quantity must be >= 0" }, { status: 400 });
   }
@@ -86,24 +97,43 @@ export async function PATCH(req: Request, { params }: ItemIdParams) {
     return NextResponse.json({ error: "excess_percent must be 0-100" }, { status: 400 });
   }
 
-  const unit = body.unit !== undefined ? (typeof body.unit === "string" && body.unit.trim() ? body.unit.trim() : body.unit) : existing.unit;
+  const unit = body.unit !== undefined ? (typeof body.unit === "string" && body.unit.trim() ? body.unit.trim() : body.unit) : existingRow.unit;
   const kg_per_m = body.kg_per_m !== undefined
     ? (body.kg_per_m != null && Number.isFinite(Number(body.kg_per_m)) ? Number(body.kg_per_m) : null)
-    : (existing.kg_per_m != null ? Number(existing.kg_per_m) : null);
+    : (existingRow.kg_per_m != null ? Number(existingRow.kg_per_m) : null);
+  const density_kg_m3 = body.density_kg_m3 !== undefined
+    ? (body.density_kg_m3 != null && Number.isFinite(Number(body.density_kg_m3)) && Number(body.density_kg_m3) > 0 ? Number(body.density_kg_m3) : null)
+    : (existingRow.density_kg_m3 != null ? Number(existingRow.density_kg_m3) : null);
+  let allocated_stream_id = body.allocated_stream_id !== undefined
+    ? (typeof body.allocated_stream_id === "string" && body.allocated_stream_id.trim() ? body.allocated_stream_id.trim() : null)
+    : existingRow.allocated_stream_id;
+  let waste_stream_key = body.waste_stream_key !== undefined
+    ? (body.waste_stream_key === null || (typeof body.waste_stream_key === "string" && !body.waste_stream_key.trim()) ? null : (typeof body.waste_stream_key === "string" ? body.waste_stream_key.trim() : body.waste_stream_key))
+    : existingRow.waste_stream_key;
+
+  if (allocated_stream_id && !waste_stream_key) {
+    const { data: stream } = await supabase.from("waste_streams").select("name").eq("id", allocated_stream_id).single();
+    if (stream?.name) waste_stream_key = String(stream.name).trim();
+  }
+
+  const conversionMap = await getConversionOptions(supabase);
+  const streamOpts = waste_stream_key ? conversionMap.get(waste_stream_key) : undefined;
+  const densityKgM3 = density_kg_m3 ?? (streamOpts?.densityKgM3 ?? null);
+  const kgPerM = kg_per_m ?? (streamOpts?.kgPerM ?? null);
   const computed_waste_qty = calcWasteQty(quantity, excess_percent);
-  const computed_waste_kg = calcWasteKg(quantity, excess_percent, unit, kg_per_m ?? undefined);
+  const computed_waste_kg = calcWasteKg(quantity, excess_percent, unit, kgPerM ?? undefined, densityKgM3 ?? undefined);
 
   const payload: Record<string, unknown> = {
     computed_waste_qty,
     computed_waste_kg: computed_waste_kg != null && Number.isFinite(computed_waste_kg) ? computed_waste_kg : null,
     kg_per_m: kg_per_m ?? null,
-    item_name: body.item_name !== undefined ? (typeof body.item_name === "string" ? body.item_name.trim() : body.item_name) : existing.item_name,
-    quantity: body.quantity !== undefined ? body.quantity : existing.quantity,
+    density_kg_m3: density_kg_m3 ?? null,
+    allocated_stream_id: allocated_stream_id ?? null,
+    waste_stream_key: waste_stream_key ?? null,
+    item_name: body.item_name !== undefined ? (typeof body.item_name === "string" ? body.item_name.trim() : body.item_name) : existingRow.item_name,
+    quantity: body.quantity !== undefined ? body.quantity : existingRow.quantity,
     unit,
-    excess_percent: body.excess_percent !== undefined ? body.excess_percent : existing.excess_percent,
-    material_type: body.material_type !== undefined ? (body.material_type === null || (typeof body.material_type === "string" && !body.material_type.trim()) ? null : (typeof body.material_type === "string" ? body.material_type.trim() : body.material_type)) : existing.material_type,
-    material_type_id: body.material_type_id !== undefined ? (body.material_type_id === null || body.material_type_id === "" ? null : body.material_type_id) : existing.material_type_id,
-    waste_stream_key: body.waste_stream_key !== undefined ? (body.waste_stream_key === null || (typeof body.waste_stream_key === "string" && !body.waste_stream_key.trim()) ? null : (typeof body.waste_stream_key === "string" ? body.waste_stream_key.trim() : body.waste_stream_key)) : existing.waste_stream_key,
+    excess_percent: body.excess_percent !== undefined ? body.excess_percent : existingRow.excess_percent,
   };
 
   const { data: updated, error: updateErr } = await supabase

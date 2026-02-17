@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
-import { useProjectContext } from "../project-context";
+import { useProjectContext, PROJECT_SELECT_FIELDS } from "../project-context";
 
 import { AppShell } from "@/components/app-shell";
 import { SubPanel } from "@/components/form-section";
@@ -83,6 +83,40 @@ type ProjectRow = {
   primary_waste_contractor_partner_id?: string | null;
 };
 
+/** Coerce value to a valid UUID or null for DB (never send empty string). */
+function toUuidOrNull(value: string | null | undefined): string | null {
+  const s = typeof value === "string" ? value.trim() : "";
+  if (!s) return null;
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  return uuidRegex.test(s) ? s : null;
+}
+
+/** Coerce to number or null for lat/lng (DB may return string). */
+function numOrNull(v: unknown): number | null {
+  if (v === null || v === undefined || v === "") return null;
+  const n = Number(v);
+  return Number.isNaN(n) ? null : n;
+}
+
+/** Whitelist of project columns allowed for update (project details save). */
+const PROJECT_UPDATE_KEYS = [
+  "site_address",
+  "site_place_id",
+  "site_lat",
+  "site_lng",
+  "address",
+  "region",
+  "project_type",
+  "start_date",
+  "client_name",
+  "main_contractor",
+  "swmp_owner",
+  "primary_waste_contractor_partner_id",
+] as const;
+
+/** Columns to select after project update so UI state can be set from DB response (no revert). */
+const PROJECT_SELECT_AFTER_UPDATE =
+  "id, site_address, site_place_id, site_lat, site_lng, address, region, project_type, start_date, client_name, main_contractor, swmp_owner, primary_waste_contractor_partner_id";
 
 /** Sorting level → default target diversion. Only applied when target is 0 or user clicks "Apply template defaults". */
 const SORTING_LEVEL_TARGET: Record<(typeof SORTING_LEVELS)[number], number> = {
@@ -91,7 +125,8 @@ const SORTING_LEVEL_TARGET: Record<(typeof SORTING_LEVELS)[number], number> = {
   High: 80,
 };
 
-const WASTE_STREAM_LIBRARY = [
+/** Fallback when /api/catalog/waste-streams is unavailable. Keep keys (names) identical to DB seed. */
+const FALLBACK_WASTE_STREAM_LIBRARY = [
   "Mixed C&D",
   "Timber (untreated)",
   "Timber (treated)",
@@ -120,12 +155,10 @@ const WASTE_STREAM_LIBRARY = [
   "Packaging (mixed)",
   "PVC pipes / services",
   "HDPE pipes / services",
-] as const;
+];
 
-const WASTE_STREAM_SET = new Set<string>(WASTE_STREAM_LIBRARY);
-
-/** Project type → default waste streams. Only labels present in WASTE_STREAM_LIBRARY are used. */
-const PROJECT_TYPE_WASTE_STREAMS: Record<string, string[]> = {
+/** Project type → default waste stream names (filtered by available library in component). */
+const PROJECT_TYPE_DEFAULT_STREAMS: Record<string, string[]> = {
   "New build house": [
     "Mixed C&D",
     "Timber (untreated)",
@@ -141,13 +174,13 @@ const PROJECT_TYPE_WASTE_STREAMS: Record<string, string[]> = {
     "Paints/adhesives/chemicals",
     "E-waste (cables/lighting/appliances)",
     "Soil / spoil (cleanfill if verified)",
-  ].filter((s) => WASTE_STREAM_SET.has(s)),
+  ],
   "Civil works / earthworks": [
     "Concrete / masonry",
     "Soil / spoil (cleanfill if verified)",
     "Soft plastics (wrap/strapping)",
     "Metals",
-  ].filter((s) => WASTE_STREAM_SET.has(s)),
+  ],
   "Commercial fit-out": [
     "Plasterboard / GIB",
     "Timber (untreated)",
@@ -160,7 +193,7 @@ const PROJECT_TYPE_WASTE_STREAMS: Record<string, string[]> = {
     "Paints/adhesives/chemicals",
     "E-waste (cables/lighting/appliances)",
     "Mixed C&D",
-  ].filter((s) => WASTE_STREAM_SET.has(s)),
+  ],
   "Demolition / strip-out (commercial)": [
     "Concrete / masonry",
     "Metals",
@@ -169,14 +202,8 @@ const PROJECT_TYPE_WASTE_STREAMS: Record<string, string[]> = {
     "Plasterboard / GIB",
     "Glass",
     "Mixed C&D",
-  ].filter((s) => WASTE_STREAM_SET.has(s)),
+  ],
 };
-
-function getWasteStreamsForProjectType(projectType: string): string[] {
-  const mapped = PROJECT_TYPE_WASTE_STREAMS[projectType];
-  if (mapped && mapped.length > 0) return [...mapped];
-  return ["Mixed C&D"];
-}
 
 /** Build default plan for a stream when applying project type template (quantity left empty). */
 function buildDefaultPlanForStream(stream: string): WasteStreamPlanInput {
@@ -354,11 +381,36 @@ export default function ProjectInputsPage() {
   const [projectSaveErr, setProjectSaveErr] = useState<string | null>(null);
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
 
+  // Waste streams: canonical list from DB (fallback to constant if API unavailable)
+  const [wasteStreamLibrary, setWasteStreamLibrary] = useState<string[]>(FALLBACK_WASTE_STREAM_LIBRARY);
+  const wasteStreamSet = useMemo(() => new Set(wasteStreamLibrary), [wasteStreamLibrary]);
+  const getWasteStreamsForProjectType = useCallback(
+    (projectType: string): string[] => {
+      const mapped = PROJECT_TYPE_DEFAULT_STREAMS[projectType];
+      if (mapped?.length) return mapped.filter((s) => wasteStreamSet.has(s));
+      return ["Mixed C&D"].filter((s) => wasteStreamSet.has(s)).length ? ["Mixed C&D"] : wasteStreamLibrary.slice(0, 1);
+    },
+    [wasteStreamSet, wasteStreamLibrary]
+  );
+
   // Catalog: DB-driven partners and facilities (replaces preset getPartners / getFacilitiesForStream)
   const [catalogPartners, setCatalogPartners] = useState<Partner[]>([]);
   const [catalogPartnersLoading, setCatalogPartnersLoading] = useState(true);
   const [facilitiesByPartner, setFacilitiesByPartner] = useState<Record<string, Facility[]>>({});
   const [facilitiesLoadingByPartner, setFacilitiesLoadingByPartner] = useState<Record<string, boolean>>({});
+
+  // Fetch canonical waste streams from DB (used for stream list and project-type defaults)
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/catalog/waste-streams", { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : Promise.resolve(null)))
+      .then((body: { waste_streams?: { name: string }[] } | null) => {
+        if (cancelled || !body?.waste_streams?.length) return;
+        setWasteStreamLibrary(body.waste_streams.map((w) => w.name));
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
 
   const effectiveProjectType = projectType === "Other" ? projectTypeOther.trim() : projectType.trim();
   const requiredOk =
@@ -436,10 +488,26 @@ export default function ProjectInputsPage() {
       });
   }
 
-  // When a plan has partner_id, ensure we have facilities loaded for that partner (for display and dropdown)
+  // Effective partner per stream: stream.partner_id ?? project.primary_waste_contractor_partner_id ?? null
+  const getEffectivePartnerId = useCallback(
+    (plan: WasteStreamPlan | undefined, primaryId: string | null): string | null => {
+      if (plan?.partner_id != null && String(plan.partner_id).trim() !== "") return String(plan.partner_id).trim();
+      return primaryId ?? null;
+    },
+    []
+  );
+
+  // When a plan has partner_id or inherits primary, ensure we have facilities loaded for that partner
   const partnerIdsInPlans = useMemo(
-    () => Array.from(new Set(streamPlans.map((p) => p.partner_id).filter((id): id is string => id != null && id !== ""))),
-    [streamPlans]
+    () =>
+      Array.from(
+        new Set(
+          streamPlans
+            .map((p) => getEffectivePartnerId(p, primaryWasteContractorPartnerId))
+            .filter((id): id is string => id != null && id !== "")
+        )
+      ),
+    [streamPlans, primaryWasteContractorPartnerId, getEffectivePartnerId]
   );
   useEffect(() => {
     partnerIdsInPlans.forEach((pid) => {
@@ -510,6 +578,8 @@ export default function ProjectInputsPage() {
   // Default selection for new/empty projects: ensure Mixed C&D is selected on first load.
   const didInitDefaultStreamsRef = useRef(false);
   const lastHydratedProjectIdRef = useRef<string | null>(null);
+  /** When true, user has edited project-detail fields (e.g. Primary Waste Contractor); do not overwrite from project/context until save or projectId change. */
+  const projectDetailsDirtyRef = useRef(false);
   useEffect(() => {
     if (didInitDefaultStreamsRef.current) return;
     if (loading) return;
@@ -615,38 +685,43 @@ export default function ProjectInputsPage() {
       if (projectContext?.project?.id === projectId) {
         project = projectContext.project as ProjectRow;
         setProject(project);
-        setClientLogoUrl(project.client_logo_url ?? "");
-        setReportTitle(project.report_title ?? "");
-        setReportFooter(project.report_footer_override ?? "");
-        setProjectClientName(project.client_name ?? "");
-        const addr = (project.site_address ?? project.address ?? "") as string;
-        setSiteAddress(addr);
-        const pid = project.site_place_id ?? null;
-        const lat = project.site_lat ?? null;
-        const lng = project.site_lng ?? null;
-        setSiteAddressValidated(
-          pid && lat != null && lng != null
-            ? { formatted_address: addr, place_id: pid, lat: Number(lat), lng: Number(lng) }
-            : null
-        );
-        setRegion(project.region ?? "");
-        const pt = project.project_type ?? "";
-        if (pt && !PROJECT_TYPE_OPTIONS.includes(pt)) {
-          setProjectType("Other");
-          setProjectTypeOther(pt);
-        } else {
-          setProjectType(pt);
-          setProjectTypeOther("");
+        const shouldHydrateProjectDetails =
+          lastHydratedProjectIdRef.current !== projectId || !projectDetailsDirtyRef.current;
+        if (shouldHydrateProjectDetails) {
+          projectDetailsDirtyRef.current = false;
+          setClientLogoUrl(project.client_logo_url ?? "");
+          setReportTitle(project.report_title ?? "");
+          setReportFooter(project.report_footer_override ?? "");
+          setProjectClientName(project.client_name ?? "");
+          const addr = (project.site_address ?? project.address ?? "") as string;
+          setSiteAddress(addr);
+          const pid = project.site_place_id ?? null;
+          const lat = numOrNull(project.site_lat);
+          const lng = numOrNull(project.site_lng);
+          setSiteAddressValidated(
+            pid && lat != null && lng != null
+              ? { formatted_address: addr, place_id: String(pid), lat, lng }
+              : null
+          );
+          setRegion(project.region ?? "");
+          const pt = project.project_type ?? "";
+          if (pt && !PROJECT_TYPE_OPTIONS.includes(pt)) {
+            setProjectType("Other");
+            setProjectTypeOther(pt);
+          } else {
+            setProjectType(pt);
+            setProjectTypeOther("");
+          }
+          setStartDate(project.start_date ?? ""); // YYYY-MM-DD
+          setClientName(project.client_name ?? "");
+          setMainContractor(project.main_contractor ?? "");
+          setSwmpOwner(project.swmp_owner ?? "");
+          setPrimaryWasteContractorPartnerId(toUuidOrNull((project as ProjectRow).primary_waste_contractor_partner_id) ?? null);
         }
-        setStartDate(project.start_date ?? ""); // YYYY-MM-DD
-        setClientName(project.client_name ?? "");
-        setMainContractor(project.main_contractor ?? "");
-        setSwmpOwner(project.swmp_owner ?? "");
-        setPrimaryWasteContractorPartnerId((project as ProjectRow).primary_waste_contractor_partner_id ?? null);
       } else {
         const { data: projectData, error: projectErr } = await supabase
           .from("projects")
-          .select("*")
+          .select(PROJECT_SELECT_FIELDS)
           .eq("id", projectId)
           .single();
 
@@ -660,34 +735,39 @@ export default function ProjectInputsPage() {
 
         project = projectData as ProjectRow;
         setProject(project);
-        setClientLogoUrl(project.client_logo_url ?? "");
-        setReportTitle(project.report_title ?? "");
-        setReportFooter(project.report_footer_override ?? "");
-        setProjectClientName(project.client_name ?? "");
-        const addr = (project.site_address ?? project.address ?? "") as string;
-        setSiteAddress(addr);
-        const pid = project.site_place_id ?? null;
-        const lat = project.site_lat ?? null;
-        const lng = project.site_lng ?? null;
-        setSiteAddressValidated(
-          pid && lat != null && lng != null
-            ? { formatted_address: addr, place_id: pid, lat: Number(lat), lng: Number(lng) }
-            : null
-        );
-        setRegion(project.region ?? "");
-        const pt = project.project_type ?? "";
-        if (pt && !PROJECT_TYPE_OPTIONS.includes(pt)) {
-          setProjectType("Other");
-          setProjectTypeOther(pt);
-        } else {
-          setProjectType(pt);
-          setProjectTypeOther("");
+        const shouldHydrateProjectDetails =
+          lastHydratedProjectIdRef.current !== projectId || !projectDetailsDirtyRef.current;
+        if (shouldHydrateProjectDetails) {
+          projectDetailsDirtyRef.current = false;
+          setClientLogoUrl(project.client_logo_url ?? "");
+          setReportTitle(project.report_title ?? "");
+          setReportFooter(project.report_footer_override ?? "");
+          setProjectClientName(project.client_name ?? "");
+          const addr = (project.site_address ?? project.address ?? "") as string;
+          setSiteAddress(addr);
+          const pid = project.site_place_id ?? null;
+          const lat = numOrNull(project.site_lat);
+          const lng = numOrNull(project.site_lng);
+          setSiteAddressValidated(
+            pid && lat != null && lng != null
+              ? { formatted_address: addr, place_id: String(pid), lat, lng }
+              : null
+          );
+          setRegion(project.region ?? "");
+          const pt = project.project_type ?? "";
+          if (pt && !PROJECT_TYPE_OPTIONS.includes(pt)) {
+            setProjectType("Other");
+            setProjectTypeOther(pt);
+          } else {
+            setProjectType(pt);
+            setProjectTypeOther("");
+          }
+          setStartDate(project.start_date ?? ""); // YYYY-MM-DD
+          setClientName(project.client_name ?? "");
+          setMainContractor(project.main_contractor ?? "");
+          setSwmpOwner(project.swmp_owner ?? "");
+          setPrimaryWasteContractorPartnerId(toUuidOrNull((project as ProjectRow).primary_waste_contractor_partner_id) ?? null);
         }
-        setStartDate(project.start_date ?? ""); // YYYY-MM-DD
-        setClientName(project.client_name ?? "");
-        setMainContractor(project.main_contractor ?? "");
-        setSwmpOwner(project.swmp_owner ?? "");
-        setPrimaryWasteContractorPartnerId((project as ProjectRow).primary_waste_contractor_partner_id ?? null);
       }
 
       if (!mounted) return;
@@ -783,7 +863,7 @@ export default function ProjectInputsPage() {
     return () => {
       mounted = false;
     };
-  }, [projectId]);
+  }, [projectId, projectContext?.project]);
 
   // Project status (inputs/forecasting/outputs) for header and overview
   useEffect(() => {
@@ -817,6 +897,27 @@ export default function ProjectInputsPage() {
   const updatePlan = useCallback((stream: string, patch: Partial<WasteStreamPlan>) => {
     setStreamPlans((prev) => prev.map((p) => (p.category === stream ? { ...p, ...patch } : p)));
   }, []);
+
+  // Optional: when destination is facility, facility_id is null, and exactly one facility for the effective partner accepts this stream, auto-select it (no overwrite of user-set facility).
+  useEffect(() => {
+    setStreamPlans((prev) => {
+      let changed = false;
+      const next = prev.map((plan) => {
+        if (plan.destination_mode !== "facility" || (plan.facility_id != null && String(plan.facility_id).trim() !== ""))
+          return plan;
+        const ep = getEffectivePartnerId(plan, primaryWasteContractorPartnerId);
+        if (!ep) return plan;
+        const list = facilitiesByPartner[ep] ?? [];
+        const accepts = (f: { accepted_streams?: string[] }) =>
+          Array.isArray(f?.accepted_streams) && f.accepted_streams.includes(plan.category);
+        const candidates = list.filter(accepts);
+        if (candidates.length !== 1) return plan;
+        changed = true;
+        return { ...plan, facility_id: candidates[0].id };
+      });
+      return changed ? next : prev;
+    });
+  }, [streamPlans, facilitiesByPartner, primaryWasteContractorPartnerId, getEffectivePartnerId]);
 
   // Auto-save when destination (facility or custom) changes so distance recompute runs and UI updates without refresh.
   const destinationSignatureRef = useRef<string>("");
@@ -1579,55 +1680,112 @@ export default function ProjectInputsPage() {
                         lat: number;
                         lng: number;
                       };
-                      const { error } = await supabase
+                      const latNum = typeof validated.lat === "number" && !Number.isNaN(validated.lat) ? validated.lat : null;
+                      const lngNum = typeof validated.lng === "number" && !Number.isNaN(validated.lng) ? validated.lng : null;
+                      // UUID or null only (never ""); toUuidOrNull enforces this for primary_waste_contractor_partner_id
+                      const primaryPartnerId = toUuidOrNull(primaryWasteContractorPartnerId ?? null);
+                      const updatePayload: Record<string, unknown> = {
+                        site_address: validated.formatted_address ?? "",
+                        site_place_id: validated.place_id?.trim() || null,
+                        site_lat: latNum,
+                        site_lng: lngNum,
+                        address: validated.formatted_address ?? "",
+                        region: region.trim() || null,
+                        project_type: ptSave || null,
+                        start_date: startDate || null,
+                        client_name: clientName.trim() || null,
+                        main_contractor: mainContractor.trim() || null,
+                        swmp_owner: swmpOwner.trim() || null,
+                        primary_waste_contractor_partner_id: primaryPartnerId,
+                      };
+                      const sanitized = PROJECT_UPDATE_KEYS.reduce<Record<string, unknown>>((acc, key) => {
+                        if (key in updatePayload) acc[key] = updatePayload[key];
+                        return acc;
+                      }, {});
+
+                      if (process.env.NODE_ENV === "development") {
+                        console.log("[project save] Saving primary contractor", {
+                          projectId,
+                          newId: primaryPartnerId,
+                        });
+                      }
+
+                      const { data: updatedRow, error } = await supabase
                         .from("projects")
-                        .update({
-                          site_address: validated.formatted_address,
-                          site_place_id: validated.place_id,
-                          site_lat: validated.lat,
-                          site_lng: validated.lng,
-                          address: validated.formatted_address,
-                          region: region.trim(),
-                          project_type: ptSave,
-                          start_date: startDate,
-                          client_name: clientName.trim(),
-                          main_contractor: mainContractor.trim(),
-                          swmp_owner: swmpOwner.trim(),
-                          primary_waste_contractor_partner_id: primaryWasteContractorPartnerId || null,
-                        })
-                        .eq("id", projectId);
+                        .update(sanitized)
+                        .eq("id", projectId)
+                        .select(PROJECT_SELECT_AFTER_UPDATE)
+                        .single();
+
                       if (error) {
-                        setProjectSaveErr(error.message);
+                        if (process.env.NODE_ENV === "development") {
+                          console.error("[project save] Supabase error", error);
+                        }
+                        const errMsg = process.env.NODE_ENV === "development" && (error.hint || error.details)
+                          ? `${error.message} (${[error.hint, error.details].filter(Boolean).join("; ")})`
+                          : error.message;
+                        setProjectSaveErr(errMsg);
                         return;
                       }
-                      setSiteAddress(validated.formatted_address);
-                      setSiteAddressValidated({
-                        formatted_address: validated.formatted_address,
-                        place_id: validated.place_id,
-                        lat: validated.lat,
-                        lng: validated.lng,
-                      });
-                      setProject((prev) =>
-                        prev
-                          ? {
-                              ...prev,
-                              site_address: validated.formatted_address,
-                              site_place_id: validated.place_id,
-                              site_lat: validated.lat,
-                              site_lng: validated.lng,
-                              address: validated.formatted_address,
-                            }
+
+                      if (!updatedRow) {
+                        setProjectSaveErr("Save succeeded but no data returned.");
+                        return;
+                      }
+
+                      if (process.env.NODE_ENV === "development") {
+                        console.log("[project save] Saved row returned", (updatedRow as Record<string, unknown>).primary_waste_contractor_partner_id);
+                      }
+
+                      // Authoritative: verify DB actually has the value (detect RLS/trigger blocking update)
+                      const { data: verify } = await supabase
+                        .from("projects")
+                        .select("primary_waste_contractor_partner_id")
+                        .eq("id", projectId)
+                        .single();
+                      if (process.env.NODE_ENV === "development") {
+                        console.log("[project save] Verify DB value", verify?.primary_waste_contractor_partner_id);
+                        const expected = primaryPartnerId ?? null;
+                        const actual = verify?.primary_waste_contractor_partner_id ?? null;
+                        if (String(actual ?? "") !== String(expected ?? "")) {
+                          console.error("[project save] MISMATCH: DB value after update differs from what we sent. Update may be blocked (RLS/trigger).", {
+                            expected,
+                            actual,
+                          });
+                        }
+                      }
+
+                      const row = updatedRow as Record<string, unknown>;
+                      const addr = (row.site_address ?? row.address ?? "") as string;
+                      const pid = (row.site_place_id != null && String(row.site_place_id).trim() !== "")
+                        ? String(row.site_place_id).trim()
+                        : null;
+                      const lat = numOrNull(row.site_lat);
+                      const lng = numOrNull(row.site_lng);
+                      setSiteAddress(addr);
+                      setSiteAddressValidated(
+                        pid != null && lat != null && lng != null
+                          ? { formatted_address: addr, place_id: pid, lat, lng }
                           : null
                       );
+                      setRegion((row.region ?? "") as string);
+                      const pt = (row.project_type ?? "") as string;
+                      if (pt && !PROJECT_TYPE_OPTIONS.includes(pt)) {
+                        setProjectType("Other");
+                        setProjectTypeOther(pt);
+                      } else {
+                        setProjectType(pt);
+                        setProjectTypeOther("");
+                      }
+                      setStartDate((row.start_date ?? "") as string);
+                      setClientName((row.client_name ?? "") as string);
+                      setMainContractor((row.main_contractor ?? "") as string);
+                      setSwmpOwner((row.swmp_owner ?? "") as string);
+                      setPrimaryWasteContractorPartnerId(toUuidOrNull(row.primary_waste_contractor_partner_id as string) ?? null);
+                      projectDetailsDirtyRef.current = false;
+                      setProject(updatedRow as ProjectRow);
                       if (projectContext?.project?.id === projectId) {
-                        projectContext.setProject({
-                          ...projectContext.project,
-                          site_address: validated.formatted_address,
-                          site_place_id: validated.place_id,
-                          site_lat: validated.lat,
-                          site_lng: validated.lng,
-                          address: validated.formatted_address,
-                        });
+                        projectContext.setProject(updatedRow as ProjectRow);
                       }
                       setProjectSaveMsg("Saved project details.");
                     }}
@@ -1658,6 +1816,7 @@ export default function ProjectInputsPage() {
                       value={primaryWasteContractorPartnerId != null && primaryWasteContractorPartnerId !== "" ? String(primaryWasteContractorPartnerId) : "none"}
                       onValueChange={(v) => {
                         const id = v === "none" || v === "" ? null : v;
+                        projectDetailsDirtyRef.current = true;
                         setPrimaryWasteContractorPartnerId(id);
                       }}
                       disabled={saveLoading || catalogPartnersLoading}
@@ -1751,7 +1910,7 @@ export default function ProjectInputsPage() {
 
               {selectedWasteStreams.length > 0 &&
                 effectiveProjectType &&
-                PROJECT_TYPE_WASTE_STREAMS[effectiveProjectType] != null && (
+                PROJECT_TYPE_DEFAULT_STREAMS[effectiveProjectType] != null && (
                   <p className="text-sm text-muted-foreground mb-2">
                     Template available — click Apply template to set default waste streams for this project type.
                   </p>
@@ -1766,7 +1925,7 @@ export default function ProjectInputsPage() {
                   className="flex-1 min-w-[240px]"
                 />
 
-                {effectiveProjectType && PROJECT_TYPE_WASTE_STREAMS[effectiveProjectType] != null && (
+                {effectiveProjectType && PROJECT_TYPE_DEFAULT_STREAMS[effectiveProjectType] != null && (
                   <Button
                     type="button"
                     variant="outline"
@@ -1844,7 +2003,7 @@ export default function ProjectInputsPage() {
               )}
 
               <div className="grid gap-3 sm:grid-cols-2">
-                {WASTE_STREAM_LIBRARY.filter((w) =>
+                {wasteStreamLibrary.filter((w) =>
                   w.toLowerCase().includes(wasteStreamSearch.trim().toLowerCase())
                 ).map((w) => (
                   <div key={w} className="flex items-center gap-2">
@@ -1985,6 +2144,84 @@ export default function ProjectInputsPage() {
                   >
                     Copy partner to all
                   </Button>
+
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={!primaryWasteContractorPartnerId || saveLoading}
+                    onClick={async () => {
+                      if (!primaryWasteContractorPartnerId) return;
+                      const primaryId = primaryWasteContractorPartnerId;
+                      setStreamPlanMsg("Applying primary contractor to streams missing a partner…");
+                      setStreamPlanErr(null);
+                      const nextPlans = streamPlans.map((p) => {
+                        if (p.partner_id != null && String(p.partner_id).trim() !== "") return p;
+                        return { ...p, partner_id: primaryId };
+                      });
+                      setStreamPlans(nextPlans);
+                      const fromState = {
+                        sorting_level: sortingLevel,
+                        target_diversion: Math.min(100, Math.max(0, Math.round(Number(targetDiversion)) || 0)),
+                        constraints: selectedConstraints,
+                        waste_streams: selectedWasteStreams,
+                        hazards,
+                        waste_stream_plans: nextPlans.map((p) => ({
+                          ...p,
+                          manual_qty_tonnes: planManualQtyToTonnes(p, p.category) ?? null,
+                        })),
+                        responsibilities: responsibilities.map((r) => {
+                          const list = r.responsibilities.filter(Boolean);
+                          return {
+                            role: r.role.trim() || "Role",
+                            party: r.party.trim() || "—",
+                            responsibilities: list.length ? list : ["—"],
+                          };
+                        }),
+                        additional_responsibilities: additionalResponsibilities
+                          .filter((a) => a.name.trim() || a.role.trim() || a.responsibilities.trim())
+                          .map((a) => ({
+                            name: a.name.trim(),
+                            role: a.role.trim(),
+                            email: a.email?.trim() || undefined,
+                            phone: a.phone?.trim() || undefined,
+                            responsibilities: a.responsibilities.trim(),
+                          })),
+                        logistics: {
+                          waste_contractor: null,
+                          bin_preference: binPreference,
+                          reporting_cadence: reportingCadence,
+                        },
+                        monitoring: {
+                          methods: monitoringMethods,
+                          uses_software: usesSoftware,
+                          software_name: softwareName || null,
+                          dockets_description: docketsDescription,
+                        },
+                        site_controls: siteControls,
+                        notes: notes.trim() || null,
+                      };
+                      try {
+                        const normalized = normalizeSwmpInputs({ ...fromState, project_id: projectId });
+                        const { error } = await supabase.from("swmp_inputs").insert({
+                          project_id: projectId,
+                          [SWMP_INPUTS_JSON_COLUMN]: normalized,
+                        });
+                        if (error) {
+                          setStreamPlanErr(error.message || "Failed to save.");
+                          setStreamPlanMsg(null);
+                          return;
+                        }
+                        setStreamPlanMsg("Primary contractor applied to all streams missing a partner.");
+                        setStreamPlanErr(null);
+                      } catch (e) {
+                        setStreamPlanErr(e instanceof Error ? e.message : "Failed to save.");
+                        setStreamPlanMsg(null);
+                      }
+                    }}
+                  >
+                    Apply Primary Contractor to all streams missing a partner
+                  </Button>
                 </div>
               )}
 
@@ -2015,14 +2252,15 @@ export default function ProjectInputsPage() {
                     <tbody>
                       {selectedWasteStreams.map((stream) => {
                         const plan = streamPlans.find((p) => p.category === stream);
-                        const partner = plan?.partner_id ? catalogPartners.find((p) => p.id === plan.partner_id) : null;
-                        const facility = plan?.partner_id && plan?.facility_id ? facilitiesByPartner[plan.partner_id]?.find((f) => f.id === plan.facility_id) : null;
+                        const effectivePartnerId = getEffectivePartnerId(plan ?? undefined, primaryWasteContractorPartnerId);
+                        const partner = effectivePartnerId ? catalogPartners.find((p) => p.id === effectivePartnerId) : null;
+                        const facility = effectivePartnerId && plan?.facility_id ? facilitiesByPartner[effectivePartnerId]?.find((f) => f.id === plan.facility_id) : null;
                         const dest =
-                          facility
-                            ? (partner?.name ?? "") + " – " + (facility as { name?: string }).name
-                            : plan?.destination_mode === "custom"
-                              ? (plan?.custom_destination_name ?? plan?.custom_destination_address ?? "").trim() || "—"
-                              : (plan?.destination_override ?? "—");
+                          plan?.destination_mode === "custom"
+                            ? (plan?.custom_destination_name ?? plan?.custom_destination_address ?? "").trim() || "—"
+                            : facility
+                              ? (facility as { name?: string }).name ?? ""
+                              : "";
                         const manualTonnes = plan?.manual_qty_tonnes ?? (plan ? planManualQtyToTonnes(plan, stream) : null) ?? 0;
                         const forecastTonnes = plan?.forecast_qty != null && plan.forecast_qty >= 0 ? plan.forecast_qty : 0;
                         const totalTonnes = manualTonnes + forecastTonnes;
@@ -2094,8 +2332,10 @@ export default function ProjectInputsPage() {
                       } as WasteStreamPlan);
 
                     const expanded = expandedStreamPlans[stream] ?? false;
-                    const resolvedPartner = catalogPartners.find((p) => p.id === safePlan.partner_id) ?? null;
-                    const rawFacility = safePlan.partner_id && facilitiesByPartner[safePlan.partner_id]?.find((f) => f.id === safePlan.facility_id);
+                    const effectivePartnerId = getEffectivePartnerId(safePlan, primaryWasteContractorPartnerId);
+                    const isInheritedPartner = (safePlan.partner_id == null || String(safePlan.partner_id).trim() === "") && effectivePartnerId != null;
+                    const resolvedPartner = effectivePartnerId ? catalogPartners.find((p) => p.id === effectivePartnerId) ?? null : null;
+                    const rawFacility = effectivePartnerId && facilitiesByPartner[effectivePartnerId]?.find((f) => f.id === safePlan.facility_id);
                     const resolvedFacility = rawFacility && typeof rawFacility === "object" && "name" in rawFacility ? rawFacility : null;
                     const summaryOutcomes = (
                       safePlan.intended_outcomes?.length
@@ -2110,11 +2350,11 @@ export default function ProjectInputsPage() {
                     const titlePartnerName =
                       resolvedPartner?.name ?? (primaryWasteContractorPartnerId ? catalogPartners.find((p) => p.id === primaryWasteContractorPartnerId)?.name ?? "" : "") ?? "—";
                     const summaryDestination =
-                      facilityName !== ""
-                        ? (resolvedPartner?.name ? `${resolvedPartner.name} – ${facilityName}` : facilityName)
-                        : safePlan.destination_mode === "custom"
-                          ? (safePlan.custom_destination_name ?? safePlan.custom_destination_address ?? "").trim() || titlePartnerName || "—"
-                          : (safePlan.destination_override ?? (safePlan.destination ?? "").trim()) || titlePartnerName || "—";
+                      safePlan.destination_mode === "custom"
+                        ? (safePlan.custom_destination_name ?? safePlan.custom_destination_address ?? "").trim() || (safePlan.destination_override ?? (safePlan.destination ?? "").trim()) || "—"
+                        : facilityName !== ""
+                          ? (resolvedPartner?.name ? `${resolvedPartner.name} – ${facilityName}` : facilityName)
+                          : "";
                     const summaryDestinationTruncated =
                       summaryDestination.length > 50 ? `${summaryDestination.slice(0, 47)}…` : summaryDestination;
 
@@ -2275,26 +2515,31 @@ export default function ProjectInputsPage() {
                                 value={safePlan.destination_mode === "custom" ? "custom" : "facility"}
                                 onValueChange={(v) => {
                                   const mode = v === "custom" ? "custom" : "facility";
-                                  updatePlan(stream, {
-                                    destination_mode: mode,
-                                    ...(mode === "facility"
-                                      ? {
-                                          facility_id: safePlan.facility_id,
-                                          custom_destination_name: null,
-                                          custom_destination_address: null,
-                                          custom_destination_place_id: null,
-                                          custom_destination_lat: null,
-                                          custom_destination_lng: null,
-                                          destination_override: null,
-                                        }
-                                      : {
-                                          facility_id: null,
-                                          partner_id: null,
-                                          destination_override: null,
-                                        }),
-                                  });
-                                  if (mode === "facility" && safePlan.partner_id) {
-                                    loadFacilitiesForPartner(safePlan.partner_id);
+                                  if (mode === "facility") {
+                                    const partnerKey = String(effectivePartnerId ?? "").trim();
+                                    const facilityList = partnerKey ? (facilitiesByPartner[partnerKey] ?? []) : [];
+                                    const validFacilityId =
+                                      safePlan.facility_id && facilityList.some((f) => f.id === safePlan.facility_id)
+                                        ? safePlan.facility_id
+                                        : null;
+                                    updatePlan(stream, {
+                                      destination_mode: "facility",
+                                      facility_id: validFacilityId,
+                                      custom_destination_name: null,
+                                      custom_destination_address: null,
+                                      custom_destination_place_id: null,
+                                      custom_destination_lat: null,
+                                      custom_destination_lng: null,
+                                      destination_override: null,
+                                    });
+                                    if (effectivePartnerId) loadFacilitiesForPartner(effectivePartnerId);
+                                  } else {
+                                    updatePlan(stream, {
+                                      destination_mode: "custom",
+                                      facility_id: null,
+                                      partner_id: null,
+                                      destination_override: null,
+                                    });
                                   }
                                 }}
                                 disabled={saveLoading}
@@ -2303,7 +2548,7 @@ export default function ProjectInputsPage() {
                                   <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
-                                  <SelectItem value="facility">Facility</SelectItem>
+                                  <SelectItem value="facility">Facility (default)</SelectItem>
                                   <SelectItem value="custom">Custom destination</SelectItem>
                                 </SelectContent>
                               </Select>
@@ -2312,9 +2557,20 @@ export default function ProjectInputsPage() {
                             {safePlan.destination_mode !== "custom" && (
                               <>
                                 <div className="grid gap-2">
-                                  <Label>Partner (company)</Label>
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <Label>
+                                      {isInheritedPartner
+                                        ? "Partner (default from Primary Waste Contractor)"
+                                        : "Partner (company)"}
+                                    </Label>
+                                    {isInheritedPartner && (
+                                      <Badge variant="secondary" className="text-xs font-normal">
+                                        Default
+                                      </Badge>
+                                    )}
+                                  </div>
                                   <Select
-                                    value={safePlan.partner_id != null && safePlan.partner_id !== "" ? String(safePlan.partner_id) : "other"}
+                                    value={effectivePartnerId != null && effectivePartnerId !== "" ? String(effectivePartnerId) : "other"}
                                     onValueChange={(v) => {
                                       const partnerId = v === "other" || v === "" ? null : v;
                                       updatePlan(stream, {
@@ -2348,8 +2604,8 @@ export default function ProjectInputsPage() {
                                     </SelectContent>
                                   </Select>
                                 </div>
-                                {safePlan.partner_id != null && safePlan.partner_id !== "" && (() => {
-                                  const partnerKey = String(safePlan.partner_id).trim();
+                                {effectivePartnerId != null && effectivePartnerId !== "" ? (() => {
+                                  const partnerKey = String(effectivePartnerId).trim();
                                   const facilityList = facilitiesByPartner[partnerKey] ?? [];
                                   const isLoading = !!facilitiesLoadingByPartner[partnerKey];
                                   return (
@@ -2386,7 +2642,11 @@ export default function ProjectInputsPage() {
                                       </Select>
                                     </div>
                                   );
-                                })()}
+                                })() : (
+                                  <p className="text-sm text-muted-foreground">
+                                    Select a Primary Waste Contractor (Project Setup) or choose a Partner for this stream.
+                                  </p>
+                                )}
                               </>
                             )}
 

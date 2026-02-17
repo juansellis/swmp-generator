@@ -1,9 +1,91 @@
 /**
  * Server-side forecast API helpers: allocation sync and stream totals.
  * Used by /api/projects/[id]/forecast-items and /api/forecast-items/[itemId].
+ * Conversion priority: item override -> stream defaults -> conversion_factors -> else conversion_required (tonnes for reporting).
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+
+export type ConversionOptionsByStream = Map<
+  string,
+  { densityKgM3: number | null; kgPerM: number | null }
+>;
+
+const CONVERSION_FACTORS_TABLE_MISSING =
+  "Could not find the table 'public.conversion_factors' in the schema cache";
+
+/**
+ * Load per-stream conversion options (density for m3->kg, kg_per_m for m->kg).
+ * Priority: waste_streams.default_* then active conversion_factors by waste_stream_id.
+ * Key = stream name (waste_stream_key in forecast items).
+ * If conversion_factors table is missing, returns options from waste_streams defaults only (no throw).
+ */
+export async function getConversionOptions(
+  supabase: SupabaseClient
+): Promise<ConversionOptionsByStream> {
+  const { data: streams, error: streamsErr } = await supabase
+    .from("waste_streams")
+    .select("id, name, default_density_kg_m3, default_kg_per_m")
+    .eq("is_active", true);
+
+  if (streamsErr) throw new Error(streamsErr.message);
+  const streamList = (streams ?? []) as Array<{
+    id: string;
+    name: string;
+    default_density_kg_m3: number | null;
+    default_kg_per_m: number | null;
+  }>;
+
+  const streamIds = streamList.length > 0 ? streamList.map((s) => s.id) : [];
+  let factorList: Array<{ waste_stream_id: string; from_unit: string; to_unit: string; factor: number }> = [];
+
+  if (streamIds.length > 0) {
+    const { data: factors, error: factorsErr } = await supabase
+      .from("conversion_factors")
+      .select("waste_stream_id, from_unit, to_unit, factor")
+      .in("waste_stream_id", streamIds)
+      .eq("is_active", true);
+
+    if (factorsErr) {
+      if (factorsErr.message.includes(CONVERSION_FACTORS_TABLE_MISSING)) {
+        factorList = [];
+      } else {
+        throw new Error(factorsErr.message);
+      }
+    } else {
+      factorList = (factors ?? []) as Array<{
+        waste_stream_id: string;
+        from_unit: string;
+        to_unit: string;
+        factor: number;
+      }>;
+    }
+  }
+
+  const factorByStreamUnit = new Map<string, number>();
+  for (const f of factorList) {
+    if (f.to_unit !== "kg") continue;
+    const k = `${f.waste_stream_id}:${f.from_unit}`;
+    const n = Number(f.factor);
+    if (Number.isFinite(n) && n >= 0) factorByStreamUnit.set(k, n);
+  }
+
+  const map: ConversionOptionsByStream = new Map();
+  for (const s of streamList) {
+    const name = (s.name ?? "").trim();
+    if (!name) continue;
+    const density =
+      s.default_density_kg_m3 != null && Number.isFinite(Number(s.default_density_kg_m3))
+        ? Number(s.default_density_kg_m3)
+        : factorByStreamUnit.get(`${s.id}:m3`) ?? null;
+    const kgPerM =
+      s.default_kg_per_m != null && Number.isFinite(Number(s.default_kg_per_m))
+        ? Number(s.default_kg_per_m)
+        : factorByStreamUnit.get(`${s.id}:m`) ?? null;
+    map.set(name, { densityKgM3: density, kgPerM });
+  }
+  return map;
+}
 import { applyForecastToInputs, computeForecastTotalsByStream } from "@/lib/forecastAllocation";
 import { defaultSwmpInputs, normalizeSwmpInputs, SWMP_INPUTS_JSON_COLUMN } from "@/lib/swmp/schema";
 
@@ -84,6 +166,8 @@ type ForecastRowRaw = {
   excess_percent: number;
   unit: string | null;
   kg_per_m: number | null;
+  density_kg_m3: number | null;
+  allocated_stream_id: string | null;
   waste_stream_key: string | null;
 };
 
@@ -96,12 +180,21 @@ export async function syncForecastAllocationToInputs(
   supabase: SupabaseClient,
   projectId: string
 ): Promise<SyncForecastResult> {
-  const { data: rows, error: itemsErr } = await supabase
-    .from("project_forecast_items")
-    .select("id, quantity, excess_percent, unit, kg_per_m, waste_stream_key")
-    .eq("project_id", projectId);
+  const [conversionMap, streamIdToName, itemsResult] = await Promise.all([
+    getConversionOptions(supabase),
+    supabase.from("waste_streams").select("id, name").eq("is_active", true),
+    supabase
+      .from("project_forecast_items")
+      .select("id, quantity, excess_percent, unit, kg_per_m, density_kg_m3, allocated_stream_id, waste_stream_key")
+      .eq("project_id", projectId),
+  ]);
 
+  const { data: rows, error: itemsErr } = itemsResult;
   if (itemsErr) throw new Error(itemsErr.message);
+
+  const idToName = new Map(
+    ((streamIdToName.data ?? []) as Array<{ id: string; name: string }>).map((s) => [s.id, (s.name ?? "").trim()])
+  );
 
   const items = (rows ?? []) as ForecastRowRaw[];
   let unallocated_count = 0;
@@ -115,14 +208,19 @@ export async function syncForecastAllocationToInputs(
     const qty = Number(row.quantity) ?? 0;
     const pct = Number(row.excess_percent) ?? 0;
     const unit = (row.unit ?? "tonne").toString().trim();
-    const kgPerM = row.kg_per_m != null && Number.isFinite(Number(row.kg_per_m)) ? Number(row.kg_per_m) : null;
+    const streamKey =
+      row.allocated_stream_id && idToName.has(row.allocated_stream_id)
+        ? idToName.get(row.allocated_stream_id)!
+        : (row.waste_stream_key != null && String(row.waste_stream_key).trim() !== "" ? String(row.waste_stream_key).trim() : null);
+    const streamOpts = streamKey ? conversionMap.get(streamKey) : undefined;
+    const kgPerM = row.kg_per_m != null && Number.isFinite(Number(row.kg_per_m)) ? Number(row.kg_per_m) : (streamOpts?.kgPerM ?? null);
+    const rowDensity = row.density_kg_m3 != null && Number.isFinite(Number(row.density_kg_m3)) && Number(row.density_kg_m3) > 0 ? Number(row.density_kg_m3) : null;
+    const densityKgM3 = rowDensity ?? (streamOpts?.densityKgM3 ?? null);
     const wasteQty = calcWasteQty(qty, pct);
-    const wasteKg = toWasteKg(wasteQty, unit, { kgPerM });
+    const wasteKg = toWasteKg(wasteQty, unit, { kgPerM, densityKgM3 });
 
-    const streamKey = row.waste_stream_key != null && String(row.waste_stream_key).trim() !== "" ? String(row.waste_stream_key).trim() : null;
     const isAllocated = streamKey != null;
     const isConvertible = wasteKg != null && Number.isFinite(wasteKg) && wasteKg >= 0;
-
     if (!isAllocated) unallocated_count += 1;
     else if (!isConvertible) conversion_required_count += 1;
     else included_count += 1;

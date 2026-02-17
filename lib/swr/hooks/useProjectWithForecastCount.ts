@@ -3,7 +3,7 @@
 import useSWR from "swr";
 import { supabase } from "@/lib/supabaseClient";
 import { SWR_DEFAULT_OPTIONS } from "@/lib/swr/config";
-import type { ProjectContextProject } from "@/app/projects/[id]/project-context";
+import { PROJECT_SELECT_FIELDS, type ProjectContextProject } from "@/app/projects/[id]/project-context";
 
 type ProjectWithForecastCount = {
   project: ProjectContextProject | null;
@@ -12,7 +12,7 @@ type ProjectWithForecastCount = {
 
 async function fetcher(projectId: string): Promise<ProjectWithForecastCount> {
   const [projectRes, countRes] = await Promise.all([
-    supabase.from("projects").select("*").eq("id", projectId).single(),
+    supabase.from("projects").select(PROJECT_SELECT_FIELDS).eq("id", projectId).single(),
     supabase
       .from("project_forecast_items")
       .select("*", { count: "exact", head: true })

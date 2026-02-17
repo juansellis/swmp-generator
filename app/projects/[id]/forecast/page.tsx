@@ -35,7 +35,7 @@ const MIXED_CD_KEY = "Mixed C&D";
 type FilterStatus = "all" | "unallocated" | "needs_conversion" | "included";
 
 function getItemStatus(row: ForecastItemRow): "unallocated" | "needs_conversion" | "included" {
-  const allocated = (row.waste_stream_key ?? "").trim() !== "";
+  const allocated = (row.allocated_stream_id ?? "").trim() !== "" || (row.waste_stream_key ?? "").trim() !== "";
   const convertible = row.computed_waste_kg != null && Number.isFinite(row.computed_waste_kg) && row.computed_waste_kg >= 0;
   if (!allocated) return "unallocated";
   if (!convertible) return "needs_conversion";
@@ -70,6 +70,7 @@ export default function ProjectForecastPage() {
   const [items, setItems] = React.useState<ForecastItemRow[]>([]);
   const [serverItemIds, setServerItemIds] = React.useState<Set<string>>(new Set());
   const [projectStreams, setProjectStreams] = React.useState<string[]>([]);
+  const [wasteStreamsCatalog, setWasteStreamsCatalog] = React.useState<{ id: string; name: string }[]>([]);
   const [wasteStreamTypes, setWasteStreamTypes] = React.useState<
     { id: string; name: string; category: string | null; sort_order: number }[]
   >([]);
@@ -124,10 +125,10 @@ export default function ProjectForecastPage() {
     }
     setItemsLoading(true);
     setItemsError(null);
-    const [itemsRes, inputsRes, _] = await Promise.all([
+    const [itemsRes, inputsRes, ..._] = await Promise.all([
       supabase
         .from("project_forecast_items")
-        .select("*")
+        .select("id, project_id, item_name, quantity, unit, excess_percent, kg_per_m, density_kg_m3, allocated_stream_id, waste_stream_key, computed_waste_qty, computed_waste_kg, created_at, updated_at")
         .eq("project_id", projectId)
         .order("created_at", { ascending: true }),
       supabase
@@ -137,6 +138,21 @@ export default function ProjectForecastPage() {
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle(),
+      fetch("/api/catalog/waste-streams", { credentials: "include" })
+        .then((r) => r.json())
+        .then((body: { waste_streams?: { id: string; name: string; default_density_kg_m3?: number | null; default_kg_per_m?: number | null }[] }) => {
+          if (Array.isArray(body?.waste_streams)) {
+            setWasteStreamsCatalog(
+              body.waste_streams.map((s) => ({
+                id: s.id,
+                name: s.name,
+                default_density_kg_m3: s.default_density_kg_m3 ?? null,
+                default_kg_per_m: s.default_kg_per_m ?? null,
+              }))
+            );
+          }
+        })
+        .catch(() => {}),
       fetch("/api/catalog/waste-stream-types", { credentials: "include" })
         .then((r) => r.json())
         .then((body: { waste_stream_types?: { id: string; name: string; category: string | null; sort_order: number }[] }) => {
@@ -267,7 +283,8 @@ export default function ProjectForecastPage() {
             Number(row.quantity),
             Number(row.excess_percent) ?? 0,
             row.unit || "tonne",
-            row.kg_per_m
+            row.kg_per_m ?? undefined,
+            row.density_kg_m3 ?? undefined
           );
           const payload = {
             project_id: projectId,
@@ -276,11 +293,10 @@ export default function ProjectForecastPage() {
             unit: row.unit || "tonne",
             excess_percent: Number(row.excess_percent) ?? 0,
             kg_per_m: row.kg_per_m != null && Number.isFinite(row.kg_per_m) ? row.kg_per_m : null,
-            material_type: row.material_type || null,
-            material_type_id: row.material_type_id || null,
+            density_kg_m3: row.density_kg_m3 != null && Number.isFinite(row.density_kg_m3) && row.density_kg_m3 > 0 ? row.density_kg_m3 : null,
+            allocated_stream_id: row.allocated_stream_id ?? null,
             waste_stream_key: row.waste_stream_key || null,
             computed_waste_qty: wasteInUnit,
-            // Canonical weight for allocations; omit so DB default 0 applies, or set explicitly
             ...(wasteKg != null && Number.isFinite(wasteKg) ? { computed_waste_kg: wasteKg } : {}),
           };
           if (process.env.NODE_ENV === "development") {
@@ -321,7 +337,8 @@ export default function ProjectForecastPage() {
             Number(row.quantity),
             Number(row.excess_percent) ?? 0,
             row.unit || "tonne",
-            row.kg_per_m
+            row.kg_per_m ?? undefined,
+            row.density_kg_m3 ?? undefined
           );
           const payload = {
             item_name: row.item_name,
@@ -329,9 +346,9 @@ export default function ProjectForecastPage() {
             unit: row.unit,
             excess_percent: row.excess_percent,
             kg_per_m: row.kg_per_m != null && Number.isFinite(row.kg_per_m) ? row.kg_per_m : null,
-            material_type: row.material_type,
-            material_type_id: row.material_type_id,
-            waste_stream_key: row.waste_stream_key,
+            density_kg_m3: row.density_kg_m3 != null && Number.isFinite(row.density_kg_m3) && row.density_kg_m3 > 0 ? row.density_kg_m3 : null,
+            allocated_stream_id: row.allocated_stream_id ?? null,
+            waste_stream_key: row.waste_stream_key ?? null,
             computed_waste_qty: wasteInUnit,
             ...(wasteKg != null && Number.isFinite(wasteKg) ? { computed_waste_kg: wasteKg } : { computed_waste_kg: null }),
           };
@@ -360,7 +377,7 @@ export default function ProjectForecastPage() {
         }
 
         setForecastCount?.(nextItems.length);
-        await syncForecastToInputs(nextItems);
+        await fetch(`/api/projects/${projectId}/forecast/recompute`, { method: "POST", credentials: "include" });
 
         if (insertedIdMap.length > 0) {
           const byTemp = new Map(insertedIdMap.map((x) => [x.tempId, x.realId]));
@@ -400,7 +417,7 @@ export default function ProjectForecastPage() {
         loadItems();
       }
     },
-    [projectId, serverItemIds, setForecastCount, syncForecastToInputs]
+    [projectId, serverItemIds, setForecastCount]
   );
 
   const handleItemsChange = React.useCallback(
@@ -410,28 +427,30 @@ export default function ProjectForecastPage() {
       saveTimeoutRef.current = setTimeout(() => {
         saveTimeoutRef.current = null;
         saveItems(nextItems);
-      }, 500);
+      }, 600);
     },
     [saveItems]
   );
 
-  /** Allocate a row to a stream: ensure stream in inputs, set row's waste_stream_key, then save. */
+  /** Allocate a row to a stream: ensure stream in inputs, set allocated_stream_id + waste_stream_key, then save. */
   const handleAllocateToStream = React.useCallback(
-    async (rowId: string, streamKey: string) => {
-      await ensureStreamAndSave(streamKey);
-        const next = items.map((r) => {
+    async (rowId: string, streamId: string, streamName: string) => {
+      await ensureStreamAndSave(streamName);
+      const next = items.map((r) => {
         if (r.id !== rowId) return r;
-        const updated = { ...r, waste_stream_key: streamKey };
-        updated.computed_waste_qty = calcWasteQty(
-          Number(r.quantity),
-          Number(r.excess_percent) ?? 0
-        );
-        updated.computed_waste_kg = calcWasteKg(
-          Number(r.quantity),
-          Number(r.excess_percent) ?? 0,
-          r.unit ?? "tonne",
-          r.kg_per_m
-        ) ?? null;
+        const updated = {
+          ...r,
+          allocated_stream_id: streamId,
+          waste_stream_key: streamName,
+          computed_waste_qty: calcWasteQty(Number(r.quantity), Number(r.excess_percent) ?? 0),
+          computed_waste_kg: calcWasteKg(
+            Number(r.quantity),
+            Number(r.excess_percent) ?? 0,
+            r.unit ?? "tonne",
+            r.kg_per_m ?? undefined,
+            r.density_kg_m3 ?? undefined
+          ) ?? null,
+        };
         return updated;
       });
       setItems(next);
@@ -445,9 +464,10 @@ export default function ProjectForecastPage() {
     setAllocateAllLoading(true);
     try {
       await ensureStreamAndSave(MIXED_CD_KEY);
+      const mixedStreamId = wasteStreamsCatalog.find((s) => s.name === MIXED_CD_KEY)?.id ?? null;
       const updated = items.map((row) =>
         getItemStatus(row) === "unallocated"
-          ? { ...row, waste_stream_key: MIXED_CD_KEY }
+          ? { ...row, allocated_stream_id: mixedStreamId, waste_stream_key: MIXED_CD_KEY }
           : row
       );
       setItems(updated);
@@ -460,7 +480,7 @@ export default function ProjectForecastPage() {
     } finally {
       setAllocateAllLoading(false);
     }
-  }, [projectId, items, ensureStreamAndSave, saveItems]);
+  }, [projectId, items, wasteStreamsCatalog, ensureStreamAndSave, saveItems]);
 
   React.useEffect(() => {
     return () => {
@@ -545,8 +565,8 @@ export default function ProjectForecastPage() {
                     unit: "tonne",
                     excess_percent: 0,
                     kg_per_m: null,
-                    material_type: null,
-                    material_type_id: null,
+                    density_kg_m3: null,
+                    allocated_stream_id: null,
                     waste_stream_key: null,
                     computed_waste_qty: 0,
                     computed_waste_kg: 0,
@@ -632,8 +652,10 @@ export default function ProjectForecastPage() {
                     onItemsChange={handleItemsChange}
                     saveStatus={saveStatus}
                     projectStreams={projectStreams}
+                    wasteStreamsCatalog={wasteStreamsCatalog}
                     onAllocateToStream={handleAllocateToStream}
                     wasteStreamTypes={wasteStreamTypes}
+                    materials={undefined}
                     onRefetchWasteStreamTypes={fetchWasteStreamTypes}
                     isSuperAdmin={isSuperAdmin}
                     filterStream={filterStream}

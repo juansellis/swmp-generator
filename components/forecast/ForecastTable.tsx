@@ -4,12 +4,7 @@ import * as React from "react";
 import { cn } from "@/lib/utils";
 import { calcWasteKg, calcWasteQty } from "@/lib/forecastApi";
 import { FORECAST_UNIT_OPTIONS, WASTE_STREAM_OPTIONS } from "@/lib/forecastConstants";
-import {
-  getMatchingProjectStream,
-  getSuggestedStreamKeyForMaterial,
-} from "@/lib/forecastAllocation";
-import { inferMaterialType } from "@/lib/forecastInferMaterialType";
-import type { WasteStreamTypeRow } from "@/app/api/catalog/waste-stream-types/route";
+import { getSuggestedStreamKeyForMaterial } from "@/lib/forecastAllocation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,15 +24,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Trash2Icon, PlusIcon, RefreshCwIcon } from "lucide-react";
+import { Trash2Icon, PlusIcon, CheckIcon, AlertTriangleIcon } from "lucide-react";
 
 export type ForecastItemRow = {
   id: string;
@@ -48,8 +35,11 @@ export type ForecastItemRow = {
   excess_percent: number;
   /** When unit = m: kg per metre (required for weight conversion). */
   kg_per_m?: number | null;
-  material_type: string | null;
-  material_type_id: string | null;
+  /** When unit = m3: row override density kg/m³ for conversion. */
+  density_kg_m3?: number | null;
+  /** Canonical stream (waste_streams.id). */
+  allocated_stream_id?: string | null;
+  /** Stream name (denormalized for display / backward compat). */
   waste_stream_key: string | null;
   computed_waste_qty: number;
   /** Waste in kg for allocation; null = non-weight or missing conversion. */
@@ -71,7 +61,8 @@ function formatWasteQtyDisplay(value: number): string {
 export type RowDisplayStatus = "unallocated" | "needs_conversion" | "included";
 
 function getRowStatus(row: ForecastItemRow): RowDisplayStatus {
-  const allocated = (row.waste_stream_key ?? "").trim() !== "";
+  const allocated =
+    (row.allocated_stream_id ?? "").trim() !== "" || (row.waste_stream_key ?? "").trim() !== "";
   const convertible =
     row.computed_waste_kg != null &&
     Number.isFinite(row.computed_waste_kg) &&
@@ -87,20 +78,25 @@ export interface ForecastTableProps {
   onItemsChange: (items: ForecastItemRow[]) => void;
   saveStatus?: "idle" | "saving" | "saved" | "error";
   disabled?: boolean;
-  /** Current project waste stream keys (from latest swmp_inputs) for auto-match and unallocated prompt. */
+  /** Current project waste stream names (from swmp_inputs) for "Add stream" prompt. */
   projectStreams?: string[];
-  /** Allocate row to stream: ensure stream in inputs + set waste_stream_key, then save. */
-  onAllocateToStream?: (rowId: string, streamKey: string) => void;
-  /** Waste stream types from catalog (Material Type dropdown). Refetch on focus to stay current. */
-  wasteStreamTypes?: WasteStreamTypeRow[];
-  /** Refetch waste stream types (e.g. when opening Material Type dropdown or clicking Refresh). */
-  onRefetchWasteStreamTypes?: () => void;
-  /** If true, show "+ Add new waste stream type" in Material Type dropdown. */
-  isSuperAdmin?: boolean;
-  /** When set, only show items allocated to this waste stream (e.g. from Inputs "View contributing forecast items"). */
+  /** Catalog streams (id, name, defaults). Used for dropdown and to auto-fill density/kg_per_m from stream defaults. */
+  wasteStreamsCatalog?: {
+    id: string;
+    name: string;
+    default_density_kg_m3?: number | null;
+    default_kg_per_m?: number | null;
+  }[];
+  /** Allocate row to stream: ensure stream in inputs + set allocated_stream_id + waste_stream_key, then save. */
+  onAllocateToStream?: (rowId: string, streamId: string, streamName: string) => void;
+  /** When set, only show items allocated to this waste stream. */
   filterStream?: string | null;
-  /** Filter displayed rows by allocation/convertibility status. */
   displayFilter?: "all" | "unallocated" | "needs_conversion" | "included";
+  /** @deprecated Material type UI hidden. */
+  wasteStreamTypes?: { id: string; name: string }[];
+  materials?: { id: string; name: string; key?: string }[];
+  onRefetchWasteStreamTypes?: () => void;
+  isSuperAdmin?: boolean;
 }
 
 const DEFAULT_ROW: Omit<ForecastItemRow, "id" | "project_id"> = {
@@ -109,8 +105,8 @@ const DEFAULT_ROW: Omit<ForecastItemRow, "id" | "project_id"> = {
   unit: "tonne",
   excess_percent: 0,
   kg_per_m: null,
-  material_type: null,
-  material_type_id: null,
+  density_kg_m3: null,
+  allocated_stream_id: null,
   waste_stream_key: null,
   computed_waste_qty: 0,
   computed_waste_kg: 0,
@@ -127,8 +123,10 @@ function ForecastTableInner({
   saveStatus = "idle",
   disabled = false,
   projectStreams = [],
+  wasteStreamsCatalog = [],
   onAllocateToStream,
   wasteStreamTypes = [],
+  materials,
   onRefetchWasteStreamTypes,
   isSuperAdmin = false,
   filterStream = null,
@@ -136,23 +134,19 @@ function ForecastTableInner({
 }: ForecastTableProps) {
   const byStream =
     filterStream != null && filterStream !== ""
-      ? items.filter((r) => (r.waste_stream_key ?? "").trim() === filterStream.trim())
+      ? items.filter(
+          (r) =>
+            (r.waste_stream_key ?? "").trim() === filterStream.trim() ||
+            (r.allocated_stream_id && wasteStreamsCatalog.find((s) => s.id === r.allocated_stream_id)?.name === filterStream)
+        )
       : items;
   const displayItems =
     displayFilter === "all"
       ? byStream
       : byStream.filter((r) => getRowStatus(r) === displayFilter);
 
-  const [addTypeOpen, setAddTypeOpen] = React.useState(false);
-  const [newTypeName, setNewTypeName] = React.useState("");
-  const [addTypeLoading, setAddTypeLoading] = React.useState(false);
-  const [addTypeError, setAddTypeError] = React.useState<string | null>(null);
-  const inferTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const itemsRef = React.useRef(items);
   itemsRef.current = items;
-
-  const INFER_DEBOUNCE_MS = 400;
-  const INFER_CONFIDENCE_THRESHOLD = 0.8;
 
   const addRow = () => {
     const newRow: ForecastItemRow = {
@@ -164,7 +158,7 @@ function ForecastTableInner({
     onItemsChange([...items, newRow]);
   };
 
-  const updateRow = (id: string, patch: Partial<ForecastItemRow>, options?: { autoAllocate?: boolean }) => {
+  const updateRow = (id: string, patch: Partial<ForecastItemRow>) => {
     const next = items.map((row) => {
       if (row.id !== id) return row;
       const updated = { ...row, ...patch };
@@ -173,17 +167,23 @@ function ForecastTableInner({
       updated.quantity = Number.isNaN(qty) || qty < 0 ? 0 : qty;
       updated.excess_percent = Number.isNaN(excess) ? 0 : Math.min(100, Math.max(0, excess));
       updated.computed_waste_qty = calcWasteQty(updated.quantity, updated.excess_percent);
+      const stream = wasteStreamsCatalog?.find((s) => s.id === updated.allocated_stream_id);
+      const effectiveDensity =
+        updated.density_kg_m3 != null && Number.isFinite(updated.density_kg_m3) && updated.density_kg_m3 > 0
+          ? updated.density_kg_m3
+          : (stream?.default_density_kg_m3 != null && Number.isFinite(stream.default_density_kg_m3) && stream.default_density_kg_m3 > 0 ? stream.default_density_kg_m3 : null);
+      const effectiveKgPerM =
+        updated.kg_per_m != null && Number.isFinite(updated.kg_per_m) && updated.kg_per_m >= 0
+          ? updated.kg_per_m
+          : (stream?.default_kg_per_m != null && Number.isFinite(stream.default_kg_per_m) && stream.default_kg_per_m >= 0 ? stream.default_kg_per_m : null);
       const wasteKg = calcWasteKg(
         updated.quantity,
         updated.excess_percent,
         updated.unit ?? "tonne",
-        updated.kg_per_m
+        effectiveKgPerM ?? undefined,
+        effectiveDensity ?? undefined
       );
       updated.computed_waste_kg = wasteKg != null ? wasteKg : null;
-      if (options?.autoAllocate && patch.material_type !== undefined && projectStreams.length > 0) {
-        const match = getMatchingProjectStream(updated.material_type, projectStreams);
-        if (match) updated.waste_stream_key = match;
-      }
       return updated;
     });
     onItemsChange(next);
@@ -196,54 +196,12 @@ function ForecastTableInner({
   const updateRowRef = React.useRef(updateRow);
   updateRowRef.current = updateRow;
 
-  const tryInferMaterialType = React.useCallback((rowId: string, itemName: string) => {
-    const result = inferMaterialType(itemName);
-    if (!result || result.confidence < INFER_CONFIDENCE_THRESHOLD) return;
-    const currentItems = itemsRef.current;
-    const row = currentItems.find((r) => r.id === rowId);
-    if (!row || row.material_type || row.material_type_id) return;
-    const typeByName = new Map((wasteStreamTypes ?? []).map((t) => [t.name, t]));
-    const match = typeByName.get(result.materialTypeName);
-    if (match) {
-      updateRowRef.current(rowId, { material_type_id: match.id, material_type: match.name }, { autoAllocate: true });
-    }
-  }, [wasteStreamTypes]);
-
-  React.useEffect(() => {
-    return () => {
-      if (inferTimeoutRef.current) clearTimeout(inferTimeoutRef.current);
-    };
-  }, []);
+  // Material type inference removed; allocation is via waste_stream_key only.
 
   const getQtyError = (q: number) =>
     typeof q !== "number" || Number.isNaN(q) || q < 0 ? "Qty ≥ 0" : null;
   const getExcessError = (e: number) =>
     typeof e !== "number" || Number.isNaN(e) || e < 0 || e > 100 ? "0–100" : null;
-
-  const handleAddNewType = async () => {
-    const name = newTypeName.trim();
-    if (!name) return;
-    setAddTypeLoading(true);
-    setAddTypeError(null);
-    try {
-      const res = await fetch("/api/catalog/waste-stream-types", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ name }),
-      });
-      const data = (await res.json()) as { error?: string };
-      if (!res.ok) {
-        setAddTypeError(data?.error ?? "Failed to add");
-        return;
-      }
-      setNewTypeName("");
-      setAddTypeOpen(false);
-      onRefetchWasteStreamTypes?.();
-    } finally {
-      setAddTypeLoading(false);
-    }
-  };
 
   return (
     <div className="space-y-4">
@@ -258,19 +216,6 @@ function ForecastTableInner({
             <PlusIcon className="size-4 mr-2" />
             Add Forecast Item
           </Button>
-          {onRefetchWasteStreamTypes && (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={onRefetchWasteStreamTypes}
-              disabled={disabled}
-              title="Refresh material types"
-              aria-label="Refresh material types"
-            >
-              <RefreshCwIcon className="size-4" />
-            </Button>
-          )}
         </div>
         {saveStatus !== "idle" && (
           <span
@@ -292,11 +237,11 @@ function ForecastTableInner({
         <Table className="table-fixed w-full text-sm">
           <TableHeader>
             <TableRow className="bg-muted/50 hover:bg-muted/50 border-b border-border">
-              <TableHead className="w-[35%] font-medium px-3 py-3">Item</TableHead>
-              <TableHead className="w-[20%] font-medium px-3 py-3">Qty + Unit</TableHead>
-              <TableHead className="w-[10%] font-medium px-3 py-3">Excess %</TableHead>
-              <TableHead className="w-[20%] font-medium px-3 py-3 text-right">Waste Result</TableHead>
-              <TableHead className="w-[15%] font-medium px-3 py-3 text-right">Allocation</TableHead>
+              <TableHead className="w-[40%] font-medium px-3 py-3">Item</TableHead>
+              <TableHead className="w-[18%] font-medium px-3 py-3">Qty</TableHead>
+              <TableHead className="w-[12%] font-medium px-3 py-3">Unit</TableHead>
+              <TableHead className="w-[10%] font-medium px-3 py-3">Waste %</TableHead>
+              <TableHead className="w-[20%] font-medium px-3 py-3 text-right">Stream</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -305,158 +250,131 @@ function ForecastTableInner({
               const excessError = getExcessError(row.excess_percent);
               const computed = calcWasteQty(row.quantity, row.excess_percent);
               const status = getRowStatus(row);
-              const hasMaterial = !!row.material_type?.trim();
-              const isAllocated = !!row.waste_stream_key?.trim() && projectStreams.includes(row.waste_stream_key);
-              const showUnallocatedPrompt = hasMaterial && !isAllocated && onAllocateToStream;
-              const suggestedKey = hasMaterial ? getSuggestedStreamKeyForMaterial(row.material_type) : null;
-              const typeById = new Map(wasteStreamTypes.map((t) => [t.id, t]));
-              const typeByName = new Map(wasteStreamTypes.map((t) => [t.name, t]));
-              const resolvedId =
-                row.material_type_id && typeById.has(row.material_type_id)
-                  ? row.material_type_id
-                  : row.material_type && typeByName.has(row.material_type)
-                    ? typeByName.get(row.material_type)!.id
-                    : null;
-              const isArchived =
-                (row.material_type_id && !typeById.has(row.material_type_id)) ||
-                (row.material_type && !typeByName.has(row.material_type));
-              const displayValue = resolvedId ?? "__none__";
-              const streamOptions = projectStreams.length > 0 ? [...projectStreams] : [...WASTE_STREAM_OPTIONS];
-              const withCurrent =
-                row.waste_stream_key && !streamOptions.includes(row.waste_stream_key)
-                  ? [row.waste_stream_key, ...streamOptions]
-                  : streamOptions;
+              const streamName = row.waste_stream_key ?? wasteStreamsCatalog.find((s) => s.id === row.allocated_stream_id)?.name ?? null;
+              const isAllocated = (row.allocated_stream_id ?? "").trim() !== "" || (streamName ?? "").trim() !== "";
+              const showUnallocatedPrompt = !isAllocated && onAllocateToStream && wasteStreamsCatalog.length > 0;
+              const suggestedStream = row.item_name?.trim()
+                ? wasteStreamsCatalog.find((s) => getSuggestedStreamKeyForMaterial(row.item_name) === s.name)
+                : wasteStreamsCatalog.find((s) => s.name === "Mixed C&D");
+              const streamOptions = wasteStreamsCatalog.length > 0 ? wasteStreamsCatalog : WASTE_STREAM_OPTIONS.map((name) => ({ id: name, name }));
+              const streamSelectValue =
+                wasteStreamsCatalog.length > 0
+                  ? (row.allocated_stream_id ?? "__none__")
+                  : (row.waste_stream_key ?? row.allocated_stream_id ?? "__none__");
 
               return (
                 <TableRow
                   key={row.id}
                   className="border-b border-border hover:bg-muted/30"
                 >
-                  <TableCell className="px-3 py-4 align-middle min-w-0">
-                    <div className="space-y-2">
-                      <Input
-                        value={row.item_name}
-                        onChange={(e) => {
-                          const value = e.target.value;
-                          updateRow(row.id, { item_name: value });
-                          if (inferTimeoutRef.current) clearTimeout(inferTimeoutRef.current);
-                          inferTimeoutRef.current = setTimeout(() => {
-                            inferTimeoutRef.current = null;
-                            tryInferMaterialType(row.id, value);
-                          }, INFER_DEBOUNCE_MS);
-                        }}
-                        placeholder="Item name"
-                        className={cn(TABLE_CONTROL_CLASS, "text-sm w-full")}
-                        disabled={disabled}
-                        aria-invalid={undefined}
-                      />
-                      <div className="min-w-0">
-                        <Select
-                          value={displayValue}
-                          onValueChange={(v) => {
-                            if (v === "__add_new__") {
-                              setAddTypeOpen(true);
-                              return;
-                            }
-                            if (v === "__none__") {
-                              updateRow(row.id, { material_type_id: null, material_type: null }, { autoAllocate: true });
-                              return;
-                            }
-                            const t = typeById.get(v);
-                            if (t) {
-                              updateRow(row.id, { material_type_id: t.id, material_type: t.name }, { autoAllocate: true });
-                            }
-                          }}
-                          onOpenChange={(open) => {
-                            if (open && onRefetchWasteStreamTypes) onRefetchWasteStreamTypes();
-                          }}
-                          disabled={disabled}
-                        >
-                          <SelectTrigger className={cn(TABLE_CONTROL_CLASS, "text-xs w-full justify-between !h-8")} size="sm">
-                            <SelectValue placeholder="Material type" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="__none__">—</SelectItem>
-                            {wasteStreamTypes.map((t) => (
-                              <SelectItem key={t.id} value={t.id}>
-                                {t.name}
-                              </SelectItem>
-                            ))}
-                            {isSuperAdmin && (
-                              <SelectItem value="__add_new__" className="text-primary font-medium">
-                                + Add new waste stream type
-                              </SelectItem>
-                            )}
-                          </SelectContent>
-                        </Select>
-                        {isArchived && row.material_type && (
-                          <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-0.5">(Archived) {row.material_type}</p>
-                        )}
-                      </div>
-                    </div>
+                  <TableCell className="px-3 py-4 align-middle min-w-0 w-[40%]">
+                    <Input
+                      value={row.item_name}
+                      onChange={(e) => updateRow(row.id, { item_name: e.target.value })}
+                      placeholder="Item name"
+                      className={cn(TABLE_CONTROL_CLASS, "text-sm w-full")}
+                      disabled={disabled}
+                      aria-invalid={undefined}
+                    />
                   </TableCell>
-                  <TableCell className="px-3 py-4 align-middle min-w-0">
-                    <div className="flex flex-col gap-1.5">
-                      <div className="flex gap-1.5 items-center">
+                  <TableCell className="px-3 py-4 align-middle min-w-0 w-[18%]">
+                    <Input
+                      type="number"
+                      min={0}
+                      step="any"
+                      value={row.quantity === 0 ? "" : row.quantity}
+                      onChange={(e) => {
+                        const v = e.target.value === "" ? 0 : parseFloat(e.target.value);
+                        const clamped = Number.isNaN(v) || v < 0 ? 0 : v;
+                        updateRow(row.id, { quantity: clamped });
+                      }}
+                      placeholder="0"
+                      className={cn(
+                        TABLE_CONTROL_CLASS,
+                        "text-sm w-full tabular-nums",
+                        qtyError && "border-destructive aria-invalid"
+                      )}
+                      disabled={disabled}
+                      aria-invalid={!!qtyError}
+                    />
+                    {qtyError && <p className="text-xs text-destructive mt-0.5">{qtyError}</p>}
+                  </TableCell>
+                  <TableCell className="px-3 py-4 align-middle min-w-0 w-[12%]">
+                    <Select
+                      value={row.unit || "tonne"}
+                      onValueChange={(v) => {
+                        const stream = wasteStreamsCatalog?.find((s) => s.id === row.allocated_stream_id);
+                        const patch: Partial<ForecastItemRow> = { unit: v };
+                        if (v === "m3" || v === "m³") {
+                          if ((row.density_kg_m3 == null || !Number.isFinite(row.density_kg_m3) || row.density_kg_m3 <= 0) && stream?.default_density_kg_m3 != null && Number.isFinite(stream.default_density_kg_m3)) {
+                            patch.density_kg_m3 = stream.default_density_kg_m3;
+                          }
+                        } else if (v === "m" || v === "metre" || v === "metres") {
+                          if ((row.kg_per_m == null || !Number.isFinite(row.kg_per_m) || row.kg_per_m < 0) && stream?.default_kg_per_m != null && Number.isFinite(stream.default_kg_per_m)) {
+                            patch.kg_per_m = stream.default_kg_per_m;
+                          }
+                        }
+                        updateRow(row.id, patch);
+                      }}
+                      disabled={disabled}
+                    >
+                      <SelectTrigger className={cn(TABLE_CONTROL_CLASS, "text-sm w-full justify-between !h-9")} size="sm">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {FORECAST_UNIT_OPTIONS.map((u) => (
+                          <SelectItem key={u} value={u}>
+                            {u}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {(row.unit === "m" || row.unit === "metre" || row.unit === "metres") && (() => {
+                      const streamForRow = wasteStreamsCatalog?.find((s) => s.id === row.allocated_stream_id);
+                      const effectiveKgPerM = row.kg_per_m != null && row.kg_per_m >= 0 ? row.kg_per_m : (streamForRow?.default_kg_per_m ?? null);
+                      return (
+                      <div className="mt-1.5 flex items-center gap-1">
+                        <Label className="text-[10px] text-muted-foreground shrink-0">kg/m</Label>
                         <Input
                           type="number"
                           min={0}
                           step="any"
-                          value={row.quantity === 0 ? "" : row.quantity}
+                          value={effectiveKgPerM != null && effectiveKgPerM >= 0 ? effectiveKgPerM : ""}
                           onChange={(e) => {
-                            const v = e.target.value === "" ? 0 : parseFloat(e.target.value);
-                            const clamped = Number.isNaN(v) || v < 0 ? 0 : v;
-                            updateRow(row.id, { quantity: clamped });
+                            const v = e.target.value === "" ? null : parseFloat(e.target.value);
+                            const val = v != null && !Number.isNaN(v) && v >= 0 ? v : null;
+                            updateRow(row.id, { kg_per_m: val });
                           }}
-                          placeholder="0"
-                          className={cn(
-                            TABLE_CONTROL_CLASS,
-                            "text-sm flex-1 min-w-0 tabular-nums",
-                            qtyError && "border-destructive aria-invalid"
-                          )}
+                          placeholder="e.g. 5"
+                          className={cn(TABLE_CONTROL_CLASS, "text-xs flex-1 min-w-0")}
                           disabled={disabled}
-                          aria-invalid={!!qtyError}
                         />
-                        <Select
-                          value={row.unit || "tonne"}
-                          onValueChange={(v) => updateRow(row.id, { unit: v })}
-                          disabled={disabled}
-                        >
-                          <SelectTrigger className={cn(TABLE_CONTROL_CLASS, "text-sm w-[72px] shrink-0 justify-between !h-9")} size="sm">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {FORECAST_UNIT_OPTIONS.map((u) => (
-                              <SelectItem key={u} value={u}>
-                                {u}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
                       </div>
-                      {qtyError && <p className="text-xs text-destructive">{qtyError}</p>}
-                      {(row.unit === "m" || row.unit === "metre" || row.unit === "metres") && (
-                        <div className="flex items-center gap-1.5">
-                          <Label className="text-[10px] text-muted-foreground shrink-0">kg/m</Label>
-                          <Input
-                            type="number"
-                            min={0}
-                            step="any"
-                            value={row.kg_per_m != null && row.kg_per_m >= 0 ? row.kg_per_m : ""}
-                            onChange={(e) => {
-                              const v = e.target.value === "" ? null : parseFloat(e.target.value);
-                              const val = v != null && !Number.isNaN(v) && v >= 0 ? v : null;
-                              updateRow(row.id, { kg_per_m: val });
-                            }}
-                            placeholder="e.g. 5"
-                            className={cn(TABLE_CONTROL_CLASS, "text-xs flex-1 min-w-0")}
-                            disabled={disabled}
-                          />
-                        </div>
-                      )}
-                    </div>
+                    ); })()}
+                    {(row.unit === "m3" || row.unit === "m³") && (() => {
+                      const streamForRow = wasteStreamsCatalog?.find((s) => s.id === row.allocated_stream_id);
+                      const effectiveDensity = row.density_kg_m3 != null && row.density_kg_m3 > 0 ? row.density_kg_m3 : (streamForRow?.default_density_kg_m3 ?? null);
+                      return (
+                      <div className="mt-1.5 flex items-center gap-1">
+                        <Label className="text-[10px] text-muted-foreground shrink-0">kg/m³</Label>
+                        <Input
+                          type="number"
+                          min={0}
+                          step="any"
+                          value={effectiveDensity != null && effectiveDensity > 0 ? effectiveDensity : ""}
+                          onChange={(e) => {
+                            const v = e.target.value === "" ? null : parseFloat(e.target.value);
+                            const val = v != null && !Number.isNaN(v) && v > 0 ? v : null;
+                            updateRow(row.id, { density_kg_m3: val });
+                          }}
+                          placeholder="e.g. 1200"
+                          className={cn(TABLE_CONTROL_CLASS, "text-xs flex-1 min-w-0")}
+                          disabled={disabled}
+                        />
+                      </div>
+                    ); })()}
                   </TableCell>
-                  <TableCell className="px-3 py-4 align-middle min-w-0">
+                  <TableCell className="px-3 py-4 align-middle min-w-0 w-[10%]">
                     <Input
                       type="number"
                       min={0}
@@ -484,42 +402,67 @@ function ForecastTableInner({
                     />
                     {excessError && <p className="text-xs text-destructive mt-0.5">{excessError}</p>}
                   </TableCell>
-                  <TableCell className="px-3 py-4 align-middle text-right">
-                    <div className="tabular-nums text-sm text-muted-foreground space-y-0.5">
-                      <div>{formatWasteQtyDisplay(computed)} {row.unit || "tonne"}</div>
-                      {row.computed_waste_kg != null && row.computed_waste_kg >= 0 ? (
-                        <div className="text-xs">
-                          {row.computed_waste_kg.toFixed(2)} kg ({(row.computed_waste_kg / 1000).toFixed(3)} t)
-                        </div>
-                      ) : (row.quantity > 0 || row.computed_waste_qty > 0) && row.computed_waste_kg == null ? (
-                        <Badge variant="secondary" className="text-[10px] font-normal">Needs conversion</Badge>
-                      ) : null}
-                    </div>
-                  </TableCell>
-                  <TableCell className="px-3 py-4 align-middle text-right">
+                  <TableCell className="px-3 py-4 align-middle text-right w-[20%]">
                     <div className="flex flex-col items-end gap-2">
-                      <span className="text-xs text-muted-foreground">
-                        {status === "unallocated" ? "Unallocated" : status === "needs_conversion" ? "Needs conversion" : "Included"}
-                      </span>
+                      {status === "included" && (
+                        <Badge variant="default" className="text-[10px] font-normal bg-emerald-600 text-white gap-1">
+                          <CheckIcon className="size-3" /> Included
+                        </Badge>
+                      )}
+                      {status === "unallocated" && (
+                        <Badge variant="secondary" className="text-[10px] font-normal text-amber-700 dark:text-amber-400 border-amber-300 gap-1">
+                          <AlertTriangleIcon className="size-3" /> Unallocated
+                        </Badge>
+                      )}
+                      {status === "needs_conversion" && (
+                        <Badge variant="secondary" className="text-[10px] font-normal text-orange-600 dark:text-orange-400 gap-1">
+                          <AlertTriangleIcon className="size-3" /> Needs conversion
+                        </Badge>
+                      )}
                       <Select
-                        value={row.waste_stream_key ?? "__none__"}
-                        onValueChange={(v) =>
-                          updateRow(row.id, { waste_stream_key: v === "__none__" ? null : v })
-                        }
+                        value={streamSelectValue}
+                        onValueChange={(v) => {
+                          if (v === "__none__") {
+                            updateRow(row.id, { allocated_stream_id: null, waste_stream_key: null });
+                            return;
+                          }
+                          const stream = streamOptions.find((s) => s.id === v || s.name === v);
+                          const id = stream ? stream.id : v;
+                          const name = stream ? stream.name : v;
+                          const patch: Partial<ForecastItemRow> = { allocated_stream_id: wasteStreamsCatalog.length > 0 ? id : null, waste_stream_key: name };
+                          const u = (row.unit ?? "tonne").toLowerCase();
+                          if (stream && "default_density_kg_m3" in stream) {
+                            if ((u === "m3" || u === "m³") && (row.density_kg_m3 == null || !Number.isFinite(row.density_kg_m3) || row.density_kg_m3 <= 0) && stream.default_density_kg_m3 != null && Number.isFinite(stream.default_density_kg_m3)) {
+                              patch.density_kg_m3 = stream.default_density_kg_m3;
+                            }
+                            if ((u === "m" || u === "metre" || u === "metres") && (row.kg_per_m == null || !Number.isFinite(row.kg_per_m) || row.kg_per_m < 0) && stream.default_kg_per_m != null && Number.isFinite(stream.default_kg_per_m)) {
+                              patch.kg_per_m = stream.default_kg_per_m;
+                            }
+                          }
+                          updateRow(row.id, patch);
+                        }}
                         disabled={disabled}
                       >
-                        <SelectTrigger className={cn(TABLE_CONTROL_CLASS, "text-sm w-full max-w-[160px] justify-between !h-9")} size="sm">
-                          <SelectValue placeholder="Unallocated" />
+                        <SelectTrigger className={cn(TABLE_CONTROL_CLASS, "text-sm w-full max-w-[180px] justify-between !h-9")} size="sm">
+                          <SelectValue placeholder="Select stream" />
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="__none__">Unallocated</SelectItem>
-                          {withCurrent.map((s) => (
-                            <SelectItem key={s} value={s}>
-                              {s}
+                          {streamOptions.map((s) => (
+                            <SelectItem key={s.id} value={s.id}>
+                              {s.name}
                             </SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
+                      <div className="tabular-nums text-xs text-muted-foreground text-right">
+                        <div>{formatWasteQtyDisplay(computed)} {row.unit || "tonne"}</div>
+                        {row.computed_waste_kg != null && row.computed_waste_kg >= 0 ? (
+                          <div>{(row.computed_waste_kg / 1000).toFixed(3)} t</div>
+                        ) : (row.quantity > 0 || row.computed_waste_qty > 0) && row.computed_waste_kg == null ? (
+                          <span className="text-orange-600 dark:text-orange-400">Needs conversion</span>
+                        ) : null}
+                      </div>
                       {showUnallocatedPrompt && (
                         <div className="flex flex-wrap justify-end gap-1.5 text-xs">
                           <Button
@@ -527,9 +470,10 @@ function ForecastTableInner({
                             variant="outline"
                             size="sm"
                             className="h-6 px-2 text-xs"
-                            onClick={() =>
-                              onAllocateToStream?.(row.id, suggestedKey ?? row.material_type ?? "Mixed C&D")
-                            }
+                            onClick={() => {
+                              const s = suggestedStream ?? wasteStreamsCatalog[0];
+                              if (s) onAllocateToStream?.(row.id, s.id, s.name);
+                            }}
                             disabled={disabled}
                           >
                             Add stream
@@ -539,7 +483,10 @@ function ForecastTableInner({
                             variant="outline"
                             size="sm"
                             className="h-6 px-2 text-xs"
-                            onClick={() => onAllocateToStream?.(row.id, "Mixed C&D")}
+                            onClick={() => {
+                              const mixed = wasteStreamsCatalog.find((s) => s.name === "Mixed C&D") ?? wasteStreamsCatalog[0];
+                              if (mixed) onAllocateToStream?.(row.id, mixed.id, mixed.name);
+                            }}
                             disabled={disabled}
                           >
                             Mixed C&D
@@ -566,39 +513,6 @@ function ForecastTableInner({
         </Table>
       </div>
 
-      <Dialog open={addTypeOpen} onOpenChange={setAddTypeOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Add waste stream type</DialogTitle>
-            <DialogDescription>
-              Add a new material type to the catalog. It will appear in the Material Type dropdown for all users.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="new-type-name">Name</Label>
-              <Input
-                id="new-type-name"
-                value={newTypeName}
-                onChange={(e) => setNewTypeName(e.target.value)}
-                placeholder="e.g. Timber (untreated)"
-                disabled={addTypeLoading}
-              />
-            </div>
-            {addTypeError && (
-              <p className="text-sm text-destructive">{addTypeError}</p>
-            )}
-          </div>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setAddTypeOpen(false)} disabled={addTypeLoading}>
-              Cancel
-            </Button>
-            <Button type="button" onClick={handleAddNewType} disabled={!newTypeName.trim() || addTypeLoading}>
-              {addTypeLoading ? "Adding…" : "Add"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

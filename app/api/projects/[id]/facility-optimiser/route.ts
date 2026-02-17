@@ -97,8 +97,18 @@ export async function GET(_req: Request, { params }: Params) {
     total_tonnes: number;
     assigned_facility_id: string | null;
     assigned_facility_name: string | null;
+    /** Strict display: facility name, or custom name/address, or null (show "No destination selected."). Never partner/recommendation text. */
+    assigned_destination_display: string | null;
     assigned_distance_km: number | null;
     assigned_duration_min: number | null;
+    /** Partner-based recommended facility (effectivePartnerId → facilities accepting stream; min distance or first alphabetically). */
+    recommended_facility: {
+      facility_id: string;
+      facility_name: string;
+      distance_km: number | null;
+      duration_min: number | null;
+      distance_not_computed: boolean;
+    } | null;
     nearest: {
       facility_id: string;
       facility_name: string;
@@ -114,6 +124,18 @@ export async function GET(_req: Request, { params }: Params) {
     const assignedFacility = assignedFacilityId ? facilityById.get(assignedFacilityId) : null;
     const assignedDist = assignedFacilityId ? distanceByFacility.get(assignedFacilityId) : null;
 
+    // Strict destination display: only actual selected destination; never recommendation/partner as selected.
+    let assigned_destination_display: string | null = null;
+    if (plan.destination_mode === "custom") {
+      const name = (plan.custom_destination_name ?? "").trim();
+      const addr = (plan.custom_destination_address ?? "").trim();
+      if (name || addr) assigned_destination_display = name || addr;
+    }
+    if (assigned_destination_display == null && plan.destination_mode === "facility" && assignedFacilityId && assignedFacility) {
+      assigned_destination_display = assignedFacility.name;
+    }
+
+    // All facilities that accept this stream (for nearest list).
     const accepting = facilities.filter((f) => {
       const streams = (f.accepted_streams ?? []) as string[];
       return streams.some((s) => String(s).trim() === streamName);
@@ -135,17 +157,74 @@ export async function GET(_req: Request, { params }: Params) {
       .sort((a, b) => a.distance_m - b.distance_m);
     const top3 = withDistance.slice(0, 3).map(({ distance_m: _, ...rest }) => rest);
 
+    // Partner-based recommendation: effectivePartnerId = stream.partner_id ?? project.primary_waste_contractor_partner_id.
+    const effectivePartnerId = plan.partner_id ?? null;
+    const partnerFacilities = effectivePartnerId
+      ? accepting.filter((f) => f.partner_id === effectivePartnerId)
+      : [];
+    const withDistancePartner = partnerFacilities
+      .map((f) => {
+        const d = distanceByFacility.get(f.id);
+        if (!d) return { facility: f, distance_m: null as number | null, duration_s: null as number | null };
+        return {
+          facility: f,
+          distance_m: d.distance_m as number,
+          duration_s: d.duration_s as number,
+        };
+      })
+      .sort((a, b) => {
+        if (a.distance_m != null && b.distance_m != null) return a.distance_m - b.distance_m;
+        if (a.distance_m != null) return -1;
+        if (b.distance_m != null) return 1;
+        return (a.facility.name ?? "").localeCompare(b.facility.name ?? "");
+      });
+    const firstPartner = withDistancePartner[0]?.facility;
+    const firstDist = withDistancePartner[0];
+    let recommended_facility: {
+      facility_id: string;
+      facility_name: string;
+      distance_km: number | null;
+      duration_min: number | null;
+      distance_not_computed: boolean;
+    } | null = null;
+    if (firstPartner) {
+      const distance_not_computed = firstDist?.distance_m == null;
+      recommended_facility = {
+        facility_id: firstPartner.id,
+        facility_name: firstPartner.name,
+        distance_km:
+          firstDist?.distance_m != null
+            ? Math.round((firstDist.distance_m / 1000) * 100) / 100
+            : null,
+        duration_min:
+          firstDist?.duration_s != null
+            ? Math.round((firstDist.duration_s / 60) * 10) / 10
+            : null,
+        distance_not_computed,
+      };
+    }
+
+    const canonicalDistanceKm =
+      plan.distance_km != null && Number.isFinite(plan.distance_km) && plan.distance_km >= 0
+        ? plan.distance_km
+        : null;
+    const canonicalDurationMin =
+      plan.duration_min != null && Number.isFinite(plan.duration_min) && plan.duration_min >= 0
+        ? plan.duration_min
+        : null;
     streams.push({
       stream_name: streamName,
       total_tonnes: plan.total_tonnes,
       assigned_facility_id: assignedFacilityId,
       assigned_facility_name: assignedFacility?.name ?? null,
-      assigned_distance_km: assignedDist
-        ? Math.round((assignedDist.distance_m / 1000) * 100) / 100
-        : null,
-      assigned_duration_min: assignedDist
-        ? Math.round((assignedDist.duration_s / 60) * 10) / 10
-        : null,
+      assigned_destination_display,
+      assigned_distance_km:
+        canonicalDistanceKm ??
+        (assignedDist ? Math.round((assignedDist.distance_m / 1000) * 100) / 100 : null),
+      assigned_duration_min:
+        canonicalDurationMin ??
+        (assignedDist ? Math.round((assignedDist.duration_s / 60) * 10) / 10 : null),
+      recommended_facility,
       nearest: top3,
     });
   }

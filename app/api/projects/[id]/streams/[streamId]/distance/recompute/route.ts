@@ -56,7 +56,7 @@ export async function POST(_req: Request, { params }: Params) {
 
   const { data: latestInputs, error: inputsErr } = await supabase
     .from("swmp_inputs")
-    .select(SWMP_INPUTS_JSON_COLUMN)
+    .select("id, " + SWMP_INPUTS_JSON_COLUMN)
     .eq("project_id", projectId)
     .order("created_at", { ascending: false })
     .limit(1)
@@ -66,9 +66,10 @@ export async function POST(_req: Request, { params }: Params) {
     return NextResponse.json({ error: "Could not load project inputs." }, { status: 500 });
   }
 
-  const inputs = (latestInputs as Record<string, unknown>)[SWMP_INPUTS_JSON_COLUMN];
-  const plans = Array.isArray((inputs as Record<string, unknown>)?.waste_stream_plans)
-    ? ((inputs as Record<string, unknown>).waste_stream_plans as Record<string, unknown>[])
+  const inputsRow = latestInputs as unknown as Record<string, unknown>;
+  const inputs = inputsRow[SWMP_INPUTS_JSON_COLUMN] as Record<string, unknown> | undefined;
+  const plans = Array.isArray(inputs?.waste_stream_plans)
+    ? (inputs.waste_stream_plans as Record<string, unknown>[])
     : [];
   const plan = plans.find(
     (p) => (p?.category != null && String(p.category).trim() === streamCategory)
@@ -118,10 +119,11 @@ export async function POST(_req: Request, { params }: Params) {
         },
         { onConflict: "project_id,facility_id" }
       );
-    return NextResponse.json({
-      distance_km: Math.round((result.distance_m / 1000) * 100) / 100,
-      duration_min: Math.round((result.duration_s / 60) * 10) / 10,
-    });
+
+    const distance_km = Math.round((result.distance_m / 1000) * 100) / 100;
+    const duration_min = Math.round((result.duration_s / 60) * 10) / 10;
+    await persistPlanDistance(supabase, projectId, latestInputs as unknown as Record<string, unknown>, streamCategory, distance_km, duration_min);
+    return NextResponse.json({ distance_km, duration_min });
   }
 
   // custom destination
@@ -182,8 +184,29 @@ export async function POST(_req: Request, { params }: Params) {
       { onConflict: "project_id,destination_place_id" }
     );
 
-  return NextResponse.json({
-    distance_km: Math.round((result.distance_m / 1000) * 100) / 100,
-    duration_min: Math.round((result.duration_s / 60) * 10) / 10,
-  });
+  const distance_km = Math.round((result.distance_m / 1000) * 100) / 100;
+  const duration_min = Math.round((result.duration_s / 60) * 10) / 10;
+  await persistPlanDistance(supabase, projectId, latestInputs as unknown as Record<string, unknown>, streamCategory, distance_km, duration_min);
+  return NextResponse.json({ distance_km, duration_min });
+}
+
+/** Persist distance_km and duration_min to the plan in swmp_inputs so strategy/cards/table see canonical distance. */
+async function persistPlanDistance(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  projectId: string,
+  latestInputs: Record<string, unknown>,
+  streamCategory: string,
+  distance_km: number,
+  duration_min: number
+): Promise<void> {
+  const rowId = latestInputs.id as string | undefined;
+  if (!rowId) return;
+  const inputs = (latestInputs[SWMP_INPUTS_JSON_COLUMN] ?? {}) as Record<string, unknown>;
+  const plans = Array.isArray(inputs.waste_stream_plans) ? [...inputs.waste_stream_plans] as Record<string, unknown>[] : [];
+  const idx = plans.findIndex((p) => p?.category != null && String(p.category).trim() === streamCategory);
+  if (idx === -1) return;
+  const plan = { ...plans[idx], distance_km, duration_min };
+  plans[idx] = plan;
+  const nextInputs = { ...inputs, waste_stream_plans: plans };
+  await supabase.from("swmp_inputs").update({ [SWMP_INPUTS_JSON_COLUMN]: nextInputs }).eq("id", rowId);
 }

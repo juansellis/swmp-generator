@@ -33,17 +33,6 @@ function totalTonnes(items: ForecastItemRow[]): number {
 }
 
 function ForecastSummaryInner({ items, className }: ForecastSummaryProps) {
-  const byMaterial = React.useMemo(() => {
-    const map = new Map<string, number>();
-    for (const row of items) {
-      const kg = row.computed_waste_kg;
-      if (kg == null || !Number.isFinite(kg) || kg < 0) continue;
-      const key = row.material_type?.trim() || "Unspecified";
-      map.set(key, (map.get(key) ?? 0) + kg / 1000);
-    }
-    return Array.from(map.entries()).sort((a, b) => b[1] - a[1]);
-  }, [items]);
-
   const streamTonnes = React.useMemo(() => byStreamTonnes(items), [items]);
   const totalT = React.useMemo(() => totalTonnes(items), [items]);
   const streamList = Array.from(streamTonnes.entries()).sort((a, b) => b[1] - a[1]);
@@ -77,29 +66,6 @@ function ForecastSummaryInner({ items, className }: ForecastSummaryProps) {
             </p>
           )}
           <p className="text-xs text-muted-foreground mt-1">Weight-based items only</p>
-        </div>
-
-        <div>
-          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
-            By material type
-          </p>
-          <ul className="space-y-1.5 text-sm">
-            {byMaterial.length === 0 ? (
-              <li className="text-muted-foreground">—</li>
-            ) : (
-              byMaterial.map(([label, tonnes]) => (
-                <li
-                  key={label}
-                  className="flex justify-between gap-2 items-baseline"
-                >
-                  <span className="truncate">{label}</span>
-                  <span className="tabular-nums text-muted-foreground shrink-0">
-                    {tonnes.toFixed(3)} t
-                  </span>
-                </li>
-              ))
-            )}
-          </ul>
         </div>
 
         <div>

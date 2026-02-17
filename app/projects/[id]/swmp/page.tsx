@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { SWMP_INPUTS_JSON_COLUMN } from "@/lib/swmp/schema";
@@ -64,6 +64,39 @@ import { CheckCircle2, Circle, AlertCircle, FileDown, ListChecks, RefreshCw } fr
 const CARD_CLASS =
   "overflow-hidden rounded-xl border border-border shadow-sm print:shadow-none print:border print:bg-white";
 const SECTION_SPACE = "space-y-10";
+
+/** Catches render errors in a section so one broken section does not blank the whole Outputs page. */
+class SectionErrorBoundary extends React.Component<
+  { sectionId: string; children: React.ReactNode },
+  { hasError: boolean; error?: Error }
+> {
+  state = { hasError: false as const, error: undefined as Error | undefined };
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    if (process.env.NODE_ENV === "development") {
+      console.error(`[Outputs section "${this.props.sectionId}"]`, error, info.componentStack);
+    }
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <Card className={CARD_CLASS}>
+          <CardContent className="p-6">
+            <p className="text-sm text-destructive">
+              This section could not be displayed. Check the console for details.
+            </p>
+          </CardContent>
+        </Card>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 type SwmpRow = {
   id: string;
@@ -238,6 +271,8 @@ export default function SwmpPage() {
   const [distancesRecomputing, setDistancesRecomputing] = useState(false);
   const [strategySectionLoading, setStrategySectionLoading] = useState(false);
   const [forecastSectionLoading, setForecastSectionLoading] = useState(false);
+  const [strategyError, setStrategyError] = useState<string | null>(null);
+  const [conversionFactorsConfigured, setConversionFactorsConfigured] = useState<boolean | null>(null);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
 
   const [optimiserData, setOptimiserData] = useState<{
@@ -259,15 +294,42 @@ export default function SwmpPage() {
     handling: "all",
     sort: "tonnes",
   });
+  const [streamsViewMode, setStreamsViewMode] = useState<"cards" | "table">("cards");
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem("swmp-streams-view") as "cards" | "table" | null;
+      if (stored === "cards" || stored === "table") setStreamsViewMode(stored);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+  const setStreamsViewModePersisted = useCallback((mode: "cards" | "table") => {
+    setStreamsViewMode(mode);
+    try {
+      localStorage.setItem("swmp-streams-view", mode);
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   const fetchWasteStrategy = useCallback(async (id: string) => {
+    setStrategyError(null);
     if (process.env.NODE_ENV === "development") {
       console.time("[perf] strategy fetch");
     }
     const res = await fetch(`/api/projects/${id}/waste-strategy`, { credentials: "include" });
-    if (!res.ok) return;
-    const data = (await res.json()) as WasteStrategyResult;
-    setWasteStrategy(data);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const message = typeof (data as { error?: string }).error === "string" ? (data as { error: string }).error : "Failed to load strategy";
+      setStrategyError(message);
+      setWasteStrategy(null);
+      if (process.env.NODE_ENV === "development") {
+        console.timeEnd("[perf] strategy fetch");
+      }
+      return;
+    }
+    setWasteStrategy(data as WasteStrategyResult);
     if (process.env.NODE_ENV === "development") {
       console.timeEnd("[perf] strategy fetch");
     }
@@ -339,6 +401,7 @@ export default function SwmpPage() {
       setError(null);
       setChartInputs(null);
       setWasteStrategy(null);
+      setStrategyError(null);
       setForecastItems([]);
       setPlanningChecklist(null);
 
@@ -400,6 +463,13 @@ export default function SwmpPage() {
           if (typeof body?.isSuperAdmin === "boolean") setIsSuperAdmin(body.isSuperAdmin);
         })
         .catch(() => {});
+      fetch("/api/conversion-factors-status", { credentials: "include" })
+        .then((r) => r.json())
+        .then((body: { configured?: boolean }) => {
+          if (!mounted) return;
+          if (typeof body?.configured === "boolean") setConversionFactorsConfigured(body.configured);
+        })
+        .catch(() => {});
       setLoading(false);
     })();
 
@@ -447,24 +517,20 @@ export default function SwmpPage() {
     return map;
   }, [optimiserData?.streams]);
 
-  /** Stream name -> assigned facility name (from optimiser). Primary source for Facility column. */
-  const streamToAssignedFacilityName = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const s of optimiserData?.streams ?? []) {
-      if (s.assigned_facility_name) {
-        map.set(s.stream_name, s.assigned_facility_name);
-      }
+  /** Strict destination display: only actual selected destination. Never partner/recommendation as selected. */
+  function getDestinationDisplay(plan: StreamPlanItem, optimiserStream?: OptimiserStream | null): string {
+    const fromOptimiser = optimiserStream?.assigned_destination_display;
+    if (fromOptimiser != null && fromOptimiser.trim() !== "") return fromOptimiser;
+    if (plan.destination_mode === "custom") {
+      const name = (plan.custom_destination_name ?? "").trim();
+      const addr = (plan.custom_destination_address ?? "").trim();
+      if (name || addr) return name || addr;
     }
-    return map;
-  }, [optimiserData?.streams]);
-
-  function getFacilityDisplayName(plan: StreamPlanItem): string {
-    return (
-      streamToAssignedFacilityName.get(plan.stream_name) ??
-      (plan.assigned_facility_id ? facilitiesById.get(plan.assigned_facility_id) ?? null : null) ??
-      plan.recommended_facility_name ??
-      "—"
-    );
+    if (plan.destination_mode === "facility" && plan.assigned_facility_id) {
+      const name = facilitiesById.get(plan.assigned_facility_id);
+      if (name) return name;
+    }
+    return "No destination selected.";
   }
 
   const appendixData = useMemo(() => {
@@ -589,7 +655,7 @@ export default function SwmpPage() {
         prev
           ? {
               ...prev,
-              streamPlans: prev.streamPlans.map((sp) =>
+              streamPlans: (prev.streamPlans ?? []).map((sp) =>
                 sp.stream_name === streamName ? { ...sp, assigned_facility_id: null } : sp
               ),
             }
@@ -646,7 +712,7 @@ export default function SwmpPage() {
           prev
             ? {
                 ...prev,
-                streamPlans: prev.streamPlans.map((sp) =>
+                streamPlans: (prev.streamPlans ?? []).map((sp) =>
                   sp.stream_name === streamName ? { ...sp, assigned_facility_id: facilityId } : sp
                 ),
               }
@@ -723,6 +789,15 @@ export default function SwmpPage() {
           onExportClick={() => setExportMode(!exportMode)}
         />
 
+        {conversionFactorsConfigured === false && (
+          <Alert className="max-w-5xl mx-auto px-4 mb-4 border-amber-200 bg-amber-50/80 dark:border-amber-900/50 dark:bg-amber-950/30 print:hidden">
+            <AlertTitle className="text-amber-800 dark:text-amber-200">Note</AlertTitle>
+            <AlertDescription>
+              Conversion factors not configured — using waste stream defaults.
+            </AlertDescription>
+          </Alert>
+        )}
+
         <div
           className={`max-w-5xl mx-auto px-4 pb-10 ${SECTION_SPACE}`}
           data-export
@@ -734,6 +809,7 @@ export default function SwmpPage() {
               <p className="text-sm text-muted-foreground mb-6">
                 Key metrics and top recommendations at a glance.
               </p>
+              <SectionErrorBoundary sectionId="overview">
               <div className={SECTION_SPACE}>
                 {/* Planning Checklist */}
                 {checklistLoading ? (
@@ -818,7 +894,7 @@ export default function SwmpPage() {
                   </Card>
                 ) : null}
 
-                {wasteStrategy && (
+                {wasteStrategy && wasteStrategy.summary && (
                   <Card className={CARD_CLASS}>
                     <CardContent className="p-6">
                       <h2 className="text-lg font-semibold mb-4">Summary</h2>
@@ -826,19 +902,19 @@ export default function SwmpPage() {
                         {[
                           {
                             label: "Total tonnes",
-                            value: wasteStrategy.summary.total_estimated_tonnes.toFixed(1),
+                            value: (wasteStrategy.summary.total_estimated_tonnes ?? 0).toFixed(1),
                           },
                           {
                             label: "Diversion %",
-                            value: `${wasteStrategy.summary.estimated_diversion_percent.toFixed(0)}%`,
+                            value: `${(wasteStrategy.summary.estimated_diversion_percent ?? 0).toFixed(0)}%`,
                           },
                           {
                             label: "Landfill %",
-                            value: `${wasteStrategy.summary.estimated_landfill_percent.toFixed(0)}%`,
+                            value: `${(wasteStrategy.summary.estimated_landfill_percent ?? 0).toFixed(0)}%`,
                           },
                           {
                             label: "Streams",
-                            value: String(wasteStrategy.summary.streams_count),
+                            value: String(wasteStrategy.summary.streams_count ?? 0),
                           },
                           {
                             label: "Facilities utilised",
@@ -867,7 +943,7 @@ export default function SwmpPage() {
             <DiversionOutcomePie data={chartData.diversionSummary} />
                 </div>
 
-                {wasteStrategy && wasteStrategy.recommendations.length > 0 && (
+                {wasteStrategy && (wasteStrategy.recommendations?.length ?? 0) > 0 && (
                   <Card className={CARD_CLASS}>
                     <CardHeader>
                       <CardTitle className="text-lg">Top 3 recommendations</CardTitle>
@@ -877,7 +953,7 @@ export default function SwmpPage() {
                     </CardHeader>
                     <CardContent className="p-6 pt-0">
                       <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground">
-                        {wasteStrategy.recommendations
+                        {(wasteStrategy.recommendations ?? [])
                           .slice(0, 3)
                           .map((r, i) => (
                             <li key={r.id ?? i}>{r.title}</li>
@@ -887,6 +963,7 @@ export default function SwmpPage() {
                   </Card>
                 )}
             </div>
+              </SectionErrorBoundary>
           </section>
           )}
 
@@ -897,13 +974,32 @@ export default function SwmpPage() {
               <p className="text-sm text-muted-foreground mb-6">
                 Waste strategy recommendations and stream plans.
               </p>
+              <SectionErrorBoundary sectionId="strategy">
               {strategySectionLoading && !wasteStrategy ? (
                 <Card className={CARD_CLASS}>
                   <CardContent className="p-6">
                     <p className="text-sm text-muted-foreground">Loading strategy…</p>
                   </CardContent>
                 </Card>
-              ) : wasteStrategy ? (
+              ) : strategyError ? (
+                <Card className={CARD_CLASS}>
+                  <CardContent className="p-6 space-y-3">
+                    <p className="text-sm text-destructive">{strategyError}</p>
+                    <Button variant="outline" size="sm" onClick={() => projectId && fetchWasteStrategy(projectId)}>
+                      <RefreshCw className="size-4 mr-2" />
+                      Retry
+                    </Button>
+                  </CardContent>
+                </Card>
+              ) : !wasteStrategy ? (
+                <Card className={CARD_CLASS}>
+                  <CardContent className="p-6">
+                    <p className="text-sm text-muted-foreground">
+                      No strategy data yet. Save your inputs and ensure waste streams are configured to generate recommendations.
+                    </p>
+                  </CardContent>
+                </Card>
+              ) : (
               <div className={SECTION_SPACE}>
                 <Card className={CARD_CLASS}>
                   <CardHeader>
@@ -960,7 +1056,7 @@ export default function SwmpPage() {
                     ) : (
                       <Accordion type="single" collapsible defaultValue="">
                         {filteredRecommendations.map((rec, i) => {
-                          const resolved = isRecommendationResolved(rec, wasteStrategy.streamPlans);
+                          const resolved = isRecommendationResolved(rec, wasteStrategy.streamPlans ?? []);
                           return (
                             <AccordionItem
                               key={rec.id ?? i}
@@ -1003,12 +1099,13 @@ export default function SwmpPage() {
                   </CardContent>
                 </Card>
               </div>
-              ) : null}
+              )}
+              </SectionErrorBoundary>
             </section>
           )}
 
           {/* ---------- WASTE STREAMS (planning cards or print table) ---------- */}
-          {showSection("streams") && wasteStrategy && (
+          {showSection("streams") && (
             <section id="outputs-streams" className="print:break-before-auto">
               <h1 className="text-2xl font-semibold mb-2">Waste Streams</h1>
               <p className="text-sm text-muted-foreground mb-6">
@@ -1016,55 +1113,109 @@ export default function SwmpPage() {
                   ? "Stream summary with tonnes and destinations."
                   : "Set handling and facility per stream. Use cards to choose facilities and see recommendations."}
               </p>
-              {exportMode ? (
+              <SectionErrorBoundary sectionId="streams">
+              {strategySectionLoading && !wasteStrategy ? (
                 <Card className={CARD_CLASS}>
                   <CardContent className="p-6">
-                    <div className="overflow-x-auto rounded-md border min-w-0">
-                      <Table className="table-fixed w-full text-sm">
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead className="w-[20%] px-3 py-3 font-medium whitespace-normal">Stream</TableHead>
-                            <TableHead className="w-[10%] px-3 py-3 text-right font-medium">Manual (t)</TableHead>
-                            <TableHead className="w-[10%] px-3 py-3 text-right font-medium">Forecast (t)</TableHead>
-                            <TableHead className="w-[10%] px-3 py-3 text-right font-medium">Total (t)</TableHead>
-                            <TableHead className="w-[18%] px-3 py-3 font-medium">Handling</TableHead>
-                            <TableHead className="w-[32%] px-3 py-3 font-medium">Facility</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {wasteStrategy.streamPlans.map((s) => {
-                            const facilityName = getFacilityDisplayName(s);
-                            const handlingChipState: DecisionChipState =
-                              s.handling_mode === "separated" ? "separated" : s.handling_mode === "mixed" ? "mixed" : "missing";
-                            return (
-                              <TableRow key={s.stream_id} className="border-b border-border">
-                                <TableCell className="px-3 py-4 font-medium align-middle">{s.stream_name}</TableCell>
-                                <TableCell className="px-3 py-4 text-right tabular-nums align-middle">{s.manual_tonnes.toFixed(1)}</TableCell>
-                                <TableCell className="px-3 py-4 text-right tabular-nums align-middle">{s.forecast_tonnes.toFixed(1)}</TableCell>
-                                <TableCell className="px-3 py-4 text-right tabular-nums align-middle">{s.total_tonnes.toFixed(1)}</TableCell>
-                                <TableCell className="px-3 py-4 align-middle">
-                                  <DecisionChip state={handlingChipState} />
-                                </TableCell>
-                                <TableCell className="px-3 py-4 align-middle text-muted-foreground truncate max-w-[220px]">
-                                  {facilityName}
-                                </TableCell>
-                              </TableRow>
-                            );
-                          })}
-                        </TableBody>
-                      </Table>
-                    </div>
+                    <p className="text-sm text-muted-foreground">Loading waste streams…</p>
+                  </CardContent>
+                </Card>
+              ) : strategyError ? (
+                <Card className={CARD_CLASS}>
+                  <CardContent className="p-6 space-y-3">
+                    <p className="text-sm text-destructive">{strategyError}</p>
+                    <Button variant="outline" size="sm" onClick={() => projectId && fetchWasteStrategy(projectId)}>
+                      <RefreshCw className="size-4 mr-2" />
+                      Retry
+                    </Button>
+                  </CardContent>
+                </Card>
+              ) : !wasteStrategy ? (
+                <Card className={CARD_CLASS}>
+                  <CardContent className="p-6">
+                    <p className="text-sm text-muted-foreground">
+                      No waste stream data yet. Save your inputs and ensure waste streams are configured.
+                    </p>
                   </CardContent>
                 </Card>
               ) : (
                 <>
+                  {!exportMode && (
+                    <div className="flex items-center gap-1 rounded-lg bg-muted p-0.5 w-fit mb-4">
+                      <Button
+                        variant={streamsViewMode === "cards" ? "secondary" : "ghost"}
+                        size="sm"
+                        className="h-8 px-3 text-xs"
+                        onClick={() => setStreamsViewModePersisted("cards")}
+                      >
+                        Cards
+                      </Button>
+                      <Button
+                        variant={streamsViewMode === "table" ? "secondary" : "ghost"}
+                        size="sm"
+                        className="h-8 px-3 text-xs"
+                        onClick={() => setStreamsViewModePersisted("table")}
+                      >
+                        Table
+                      </Button>
+                    </div>
+                  )}
+                  {(exportMode || streamsViewMode === "table") ? (
+                    <Card className={CARD_CLASS}>
+                      <CardContent className="p-6">
+                        <div className="overflow-x-auto rounded-md border min-w-0">
+                          <Table className="table-fixed w-full text-sm">
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead className="w-[18%] px-3 py-3 font-medium whitespace-normal">Stream</TableHead>
+                                <TableHead className="w-[9%] px-3 py-3 text-right font-medium">Manual (t)</TableHead>
+                                <TableHead className="w-[9%] px-3 py-3 text-right font-medium">Forecast (t)</TableHead>
+                                <TableHead className="w-[9%] px-3 py-3 text-right font-medium">Total (t)</TableHead>
+                                <TableHead className="w-[16%] px-3 py-3 font-medium">Handling</TableHead>
+                                <TableHead className="w-[24%] px-3 py-3 font-medium">Destination</TableHead>
+                                <TableHead className="w-[10%] px-3 py-3 text-right font-medium">Distance (km)</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {(wasteStrategy.streamPlans ?? []).map((s) => {
+                                const optimiserStream = optimiserData?.streams?.find((st) => st.stream_name === s.stream_name);
+                                const destinationLabel = getDestinationDisplay(s, optimiserStream ?? null);
+                                const displayDestination = destinationLabel && destinationLabel !== "No destination selected." ? destinationLabel : "No destination selected.";
+                                const distanceKm =
+                                  (s.distance_km != null && Number.isFinite(s.distance_km)) ? s.distance_km : (optimiserStream?.assigned_distance_km ?? null);
+                                const handlingChipState: DecisionChipState =
+                                  s.handling_mode === "separated" ? "separated" : s.handling_mode === "mixed" ? "mixed" : "missing";
+                                return (
+                                  <TableRow key={s.stream_id} className="border-b border-border">
+                                    <TableCell className="px-3 py-4 font-medium align-middle">{s.stream_name}</TableCell>
+                                    <TableCell className="px-3 py-4 text-right tabular-nums align-middle">{s.manual_tonnes.toFixed(1)}</TableCell>
+                                    <TableCell className="px-3 py-4 text-right tabular-nums align-middle">{s.forecast_tonnes.toFixed(1)}</TableCell>
+                                    <TableCell className="px-3 py-4 text-right tabular-nums align-middle">{s.total_tonnes.toFixed(1)}</TableCell>
+                                    <TableCell className="px-3 py-4 align-middle">
+                                      <DecisionChip state={handlingChipState} />
+                                    </TableCell>
+                                    <TableCell className="px-3 py-4 align-middle text-muted-foreground truncate max-w-[200px]">
+                                      {displayDestination}
+                                    </TableCell>
+                                    <TableCell className="px-3 py-4 text-right tabular-nums align-middle text-muted-foreground">
+                                      {distanceKm != null && Number.isFinite(distanceKm) ? distanceKm.toFixed(1) : "—"}
+                                    </TableCell>
+                                  </TableRow>
+                                );
+                              })}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ) : (
                   <StreamPlanningCards
                     wasteStrategy={wasteStrategy}
                     optimiserData={optimiserData}
                     projectId={projectId}
                     isSuperAdmin={isSuperAdmin}
                     applyFacilityStream={applyFacilityStream}
-                    getFacilityDisplayName={getFacilityDisplayName}
+                    getDestinationDisplay={getDestinationDisplay}
                     onApplyFacility={handleApplyFacility}
                     onResetFacility={handleResetFacility}
                     onRefetch={() => {
@@ -1079,8 +1230,9 @@ export default function SwmpPage() {
                     onFilterChange={setStreamFilterState}
                     onFixMissingFilter={() => setStreamFilterState((s) => ({ ...s, filter: "missing" }))}
                   />
+                  )}
                   {/* Global recommendations (not stream-specific) */}
-                  {wasteStrategy.recommendations.filter((rec) => {
+                  {(wasteStrategy.recommendations ?? []).filter((rec) => {
                     const payload = rec.apply_action?.payload;
                     if (!payload || typeof payload !== "object") return true;
                     const streamName = (payload as { stream_name?: string }).stream_name;
@@ -1089,7 +1241,7 @@ export default function SwmpPage() {
                     <div className="mt-10">
                       <h2 className="text-lg font-semibold mb-3">Global recommendations</h2>
                       <ul className="space-y-3">
-                        {wasteStrategy.recommendations
+                        {(wasteStrategy.recommendations ?? [])
                           .filter((rec) => {
                             const payload = rec.apply_action?.payload;
                             if (!payload || typeof payload !== "object") return true;
@@ -1097,7 +1249,7 @@ export default function SwmpPage() {
                             return typeof streamName !== "string" || streamName.trim() === "";
                           })
                           .map((rec, i) => {
-                            const resolved = isRecommendationResolved(rec, wasteStrategy.streamPlans);
+                            const resolved = isRecommendationResolved(rec, wasteStrategy.streamPlans ?? []);
                             return (
                               <li
                                 key={rec.id ?? i}
@@ -1132,16 +1284,38 @@ export default function SwmpPage() {
                   )}
                 </>
               )}
+              </SectionErrorBoundary>
             </section>
           )}
 
           {/* ---------- NARRATIVE ---------- */}
-          {showSection("narrative") && wasteStrategy?.narrative && (
+          {showSection("narrative") && (
             <section id="outputs-narrative" className="print:break-before-auto">
               <h1 className="text-2xl font-semibold mb-2">Narrative</h1>
               <p className="text-sm text-muted-foreground mb-6">
                 SWMP summary, methodology, and assumptions.
               </p>
+              <SectionErrorBoundary sectionId="narrative">
+              {!wasteStrategy?.narrative ? (
+                <Card className={CARD_CLASS}>
+                  <CardContent className="p-6">
+                    <p className="text-sm text-muted-foreground">
+                      {strategySectionLoading && !wasteStrategy
+                        ? "Loading…"
+                        : strategyError
+                          ? strategyError
+                          : "No narrative generated yet. Save inputs and generate strategy to see summary and methodology."}
+                    </p>
+                    {strategyError && projectId && (
+                      <Button variant="outline" size="sm" className="mt-3" onClick={() => fetchWasteStrategy(projectId)}>
+                        <RefreshCw className="size-4 mr-2" />
+                        Retry
+                      </Button>
+                    )}
+                  </CardContent>
+                </Card>
+              ) : (
+              <>
               <Card className={CARD_CLASS}>
                 <CardContent className="p-6 space-y-4">
                   <div>
@@ -1162,21 +1336,21 @@ export default function SwmpPage() {
                       {wasteStrategy.narrative.methodology_paragraph}
                     </p>
                   </div>
-                  {wasteStrategy.narrative.key_assumptions.length > 0 && (
+                  {(wasteStrategy.narrative.key_assumptions?.length ?? 0) > 0 && (
                     <div>
                       <h2 className="text-lg font-semibold mb-2">Key assumptions</h2>
                       <ul className="list-inside list-disc space-y-1 text-sm text-muted-foreground">
-                        {wasteStrategy.narrative.key_assumptions.map((a, i) => (
+                        {(wasteStrategy.narrative.key_assumptions ?? []).map((a, i) => (
                           <li key={i}>{a}</li>
                         ))}
                       </ul>
                     </div>
                   )}
-                  {wasteStrategy.narrative.top_recommendations_bullets?.length > 0 && (
+                  {(wasteStrategy.narrative.top_recommendations_bullets?.length ?? 0) > 0 && (
                     <div>
                       <h2 className="text-lg font-semibold mb-2">Top recommendations</h2>
                       <ul className="list-inside list-disc space-y-0.5 text-sm text-muted-foreground">
-                        {wasteStrategy.narrative.top_recommendations_bullets.map((b, i) => (
+                        {(wasteStrategy.narrative.top_recommendations_bullets ?? []).map((b, i) => (
                           <li key={i}>{b}</li>
                         ))}
                       </ul>
@@ -1202,13 +1376,16 @@ export default function SwmpPage() {
                     </p>
                   </CardHeader>
                   <CardContent className="p-6 pt-0">
-              <div
-                className="prose prose-sm max-w-none dark:prose-invert swmp-html print:max-w-none"
+                    <div
+                      className="prose prose-sm max-w-none dark:prose-invert swmp-html print:max-w-none"
                       dangerouslySetInnerHTML={{ __html: swmp.content_html }}
-              />
-            </CardContent>
-          </Card>
+                    />
+                  </CardContent>
+                </Card>
               )}
+              </>
+              )}
+              </SectionErrorBoundary>
             </section>
           )}
 
@@ -1219,6 +1396,7 @@ export default function SwmpPage() {
               <p className="text-sm text-muted-foreground mb-6">
                 Forecast items by stream, unallocated, and conversion required.
               </p>
+              <SectionErrorBoundary sectionId="appendix">
               {forecastSectionLoading && forecastItems.length === 0 ? (
                 <Card className={CARD_CLASS}>
                   <CardContent className="p-6">
@@ -1389,6 +1567,7 @@ export default function SwmpPage() {
                 )}
               </div>
               )}
+              </SectionErrorBoundary>
             </section>
           )}
 

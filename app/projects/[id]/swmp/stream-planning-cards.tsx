@@ -25,14 +25,27 @@ import {
 import { MoreHorizontal, RefreshCw } from "lucide-react";
 import { INTENDED_OUTCOME_OPTIONS } from "@/lib/swmp/model";
 import { isRecommendationResolved } from "@/app/projects/[id]/swmp/recommendation-helpers";
+import { CompareFacilitiesModal } from "@/components/CompareFacilitiesModal";
+
+export type OptimiserStreamRecommendedFacility = {
+  facility_id: string;
+  facility_name: string;
+  distance_km: number | null;
+  duration_min: number | null;
+  distance_not_computed: boolean;
+};
 
 export type OptimiserStream = {
   stream_name: string;
   total_tonnes: number;
   assigned_facility_id: string | null;
   assigned_facility_name: string | null;
+  /** Strict: facility name, or custom name/address, or null. Never recommendation/partner as selected. */
+  assigned_destination_display?: string | null;
   assigned_distance_km: number | null;
   assigned_duration_min: number | null;
+  /** Partner-based recommended facility (for "Recommended: X (km)" + Apply when destination not set). */
+  recommended_facility?: OptimiserStreamRecommendedFacility | null;
   nearest: {
     facility_id: string;
     facility_name: string;
@@ -47,7 +60,10 @@ export type PlanningSummary = {
   streamsConfigured: number;
   streamsTotal: number;
   streamsMissingFacility: number;
-  totalHaulageKm: number;
+  /** Mean distance (km) across plans that have a destination with distance; null if none. */
+  averageDistanceKm: number | null;
+  /** Count of plans used in the average (destinations with distance). */
+  destinationCountWithDistance: number;
 };
 
 export function PlanningSummaryBar({
@@ -73,14 +89,19 @@ export function PlanningSummaryBar({
           </p>
         </div>
         <div>
-          <p className="text-xs font-medium text-muted-foreground">Missing facility</p>
+          <p className="text-xs font-medium text-muted-foreground">No destination</p>
           <p className="text-lg font-semibold tabular-nums">{summary.streamsMissingFacility}</p>
         </div>
         <div>
-          <p className="text-xs font-medium text-muted-foreground">Total haulage (km)</p>
+          <p className="text-xs font-medium text-muted-foreground">Average facility distance (km)</p>
           <p className="text-lg font-semibold tabular-nums">
-            {summary.totalHaulageKm > 0 ? summary.totalHaulageKm.toFixed(0) : "—"}
+            {summary.averageDistanceKm != null ? summary.averageDistanceKm.toFixed(1) : "—"}
           </p>
+          {summary.destinationCountWithDistance > 0 ? (
+            <p className="text-[10px] text-muted-foreground">Across {summary.destinationCountWithDistance} configured destination{summary.destinationCountWithDistance !== 1 ? "s" : ""}</p>
+          ) : (
+            <p className="text-[10px] text-muted-foreground">Set destinations to compute distance</p>
+          )}
         </div>
       </div>
       {showFixMissing && summary.streamsMissingFacility > 0 && onFixMissing && (
@@ -159,6 +180,17 @@ export function StreamPlanningFilters({
   );
 }
 
+/** True if stream has a destination set (facility or custom). */
+function hasDestinationSet(plan: StreamPlanItem): boolean {
+  if (plan.assigned_facility_id?.trim()) return true;
+  if (plan.destination_mode === "custom") {
+    const name = (plan.custom_destination_name ?? "").trim();
+    const addr = (plan.custom_destination_address ?? "").trim();
+    if (name || addr) return true;
+  }
+  return false;
+}
+
 function filterAndSortPlans(
   plans: StreamPlanItem[],
   optimiserStreams: OptimiserStream[],
@@ -170,9 +202,9 @@ function filterAndSortPlans(
     list = list.filter((p) => p.stream_name.toLowerCase().includes(search));
   }
   if (filters.filter === "missing") {
-    list = list.filter((p) => !p.assigned_facility_id?.trim());
+    list = list.filter((p) => !hasDestinationSet(p));
   } else if (filters.filter === "complete") {
-    list = list.filter((p) => !!p.assigned_facility_id?.trim());
+    list = list.filter((p) => hasDestinationSet(p));
   }
   if (filters.handling !== "all") {
     list = list.filter((p) => p.handling_mode === filters.handling);
@@ -182,8 +214,8 @@ function filterAndSortPlans(
     list.sort((a, b) => b.total_tonnes - a.total_tonnes);
   } else if (filters.sort === "missing_first") {
     list.sort((a, b) => {
-      const aMiss = !a.assigned_facility_id?.trim() ? 1 : 0;
-      const bMiss = !b.assigned_facility_id?.trim() ? 1 : 0;
+      const aMiss = !hasDestinationSet(a) ? 1 : 0;
+      const bMiss = !hasDestinationSet(b) ? 1 : 0;
       if (bMiss !== aMiss) return bMiss - aMiss;
       return b.total_tonnes - a.total_tonnes;
     });
@@ -211,27 +243,41 @@ export function getRecommendationsForStream(
   });
 }
 
+/** Canonical per-plan distance (km): plan.distance_km first, then optimiser assigned_distance_km. */
+function getPlanDistanceKm(plan: StreamPlanItem, optimiserStream: OptimiserStream | null): number | null {
+  if (!hasDestinationSet(plan)) return null;
+  const fromPlan = plan.distance_km != null && Number.isFinite(plan.distance_km) && plan.distance_km >= 0 ? plan.distance_km : null;
+  if (fromPlan != null) return fromPlan;
+  const km = optimiserStream?.assigned_distance_km;
+  if (km != null && Number.isFinite(km) && km >= 0) return km;
+  return null;
+}
+
 export function usePlanningSummary(
   streamPlans: StreamPlanItem[],
   optimiserStreams: OptimiserStream[]
 ): PlanningSummary {
   return React.useMemo(() => {
     const totalTonnes = streamPlans.reduce((s, p) => s + p.total_tonnes, 0);
-    const streamsMissingFacility = streamPlans.filter((p) => !p.assigned_facility_id?.trim()).length;
-    let totalHaulageKm = 0;
+    const streamsMissingFacility = streamPlans.filter((p) => !hasDestinationSet(p)).length;
     const optByStream = new Map(optimiserStreams.map((s) => [s.stream_name, s]));
+    const distances: number[] = [];
     for (const p of streamPlans) {
-      const o = optByStream.get(p.stream_name);
-      if (o?.assigned_distance_km != null && o.assigned_distance_km >= 0) {
-        totalHaulageKm += o.assigned_distance_km * (p.total_tonnes || 0);
-      }
+      const d = getPlanDistanceKm(p, optByStream.get(p.stream_name) ?? null);
+      if (d != null) distances.push(d);
     }
+    const destinationCountWithDistance = distances.length;
+    const averageDistanceKm =
+      destinationCountWithDistance > 0
+        ? distances.reduce((a, b) => a + b, 0) / destinationCountWithDistance
+        : null;
     return {
       totalTonnes,
-      streamsConfigured: streamPlans.filter((p) => p.assigned_facility_id?.trim()).length,
+      streamsConfigured: streamPlans.filter((p) => hasDestinationSet(p)).length,
       streamsTotal: streamPlans.length,
       streamsMissingFacility,
-      totalHaulageKm,
+      averageDistanceKm,
+      destinationCountWithDistance,
     };
   }, [streamPlans, optimiserStreams]);
 }
@@ -240,7 +286,8 @@ export interface StreamPlanningCardProps {
   plan: StreamPlanItem;
   allStreamPlans: StreamPlanItem[];
   optimiserStream: OptimiserStream | null;
-  facilityDisplayName: string;
+  /** Strict destination label only (facility name, custom, or "No destination selected."). Never recommendation/partner. */
+  destinationDisplayName: string;
   streamRecommendations: StrategyRecommendation[];
   projectId: string;
   distancesCached: number;
@@ -258,7 +305,7 @@ export function StreamPlanningCard({
   plan,
   allStreamPlans,
   optimiserStream,
-  facilityDisplayName,
+  destinationDisplayName,
   streamRecommendations,
   projectId,
   distancesCached,
@@ -271,16 +318,19 @@ export function StreamPlanningCard({
   onPlanPatch,
   onComputeDistances,
 }: StreamPlanningCardProps) {
-  const hasFacility = !!(plan.assigned_facility_id?.trim() || (facilityDisplayName && facilityDisplayName !== "—"));
+  const hasDestination = destinationDisplayName !== "No destination selected.";
   const nearest = optimiserStream?.nearest ?? [];
   const top3 = nearest.slice(0, 3);
+  const recommendedFacility = optimiserStream?.recommended_facility ?? null;
+  const hasPartner = !!(plan.partner_id?.trim());
   const [suggestedOpen, setSuggestedOpen] = React.useState(false);
+  const [compareModalOpen, setCompareModalOpen] = React.useState(false);
   const [recsOpen, setRecsOpen] = React.useState(false);
   const [handlingUpdating, setHandlingUpdating] = React.useState(false);
   const [outcomeUpdating, setOutcomeUpdating] = React.useState(false);
 
   const handlingChipState = plan.handling_mode === "separated" ? "separated" : plan.handling_mode === "mixed" ? "mixed" : "missing";
-  const cardComplete = hasFacility;
+  const cardComplete = hasDestination;
   const maxTonnes = Math.max(plan.total_tonnes, 1);
 
   const handleHandlingChange = async (mode: "mixed" | "separated") => {
@@ -321,10 +371,14 @@ export function StreamPlanningCard({
       {/* Header */}
       <div className="flex items-start justify-between gap-2 mb-4">
         <h3 className="font-semibold text-foreground truncate">{plan.stream_name}</h3>
-        <div className="flex items-center gap-2 shrink-0">
-          {!hasFacility && (
-            <Badge variant="destructive" className="text-xs font-normal bg-red-500/15 text-red-700 border-red-200 dark:bg-red-950/40 dark:text-red-400">
-              Missing facility
+        <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
+          {hasDestination ? (
+            <Badge variant="secondary" className="text-xs font-normal bg-emerald-500/15 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400">
+              Configured
+            </Badge>
+          ) : (
+            <Badge variant="secondary" className="text-xs font-normal bg-amber-500/15 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-400">
+              No destination
             </Badge>
           )}
           <DecisionChip state={handlingChipState} />
@@ -340,12 +394,12 @@ export function StreamPlanningCard({
             <DropdownMenuContent align="end">
               <DropdownMenuItem
                 onClick={async () => {
-                  if (hasFacility && onResetFacility) {
+                  if (hasDestination && onResetFacility) {
                     await onResetFacility(plan.stream_name);
                     onRefetch();
                   }
                 }}
-                disabled={!hasFacility}
+                disabled={!hasDestination}
               >
                 Reset facility
               </DropdownMenuItem>
@@ -386,31 +440,64 @@ export function StreamPlanningCard({
         </div>
         <div>
           <p className="text-xs font-medium text-muted-foreground mb-1">Destination</p>
-          {hasFacility ? (
-            <div className="text-sm">
-              <p className="font-medium truncate" title={facilityDisplayName}>
-                {facilityDisplayName}
+          {hasDestination ? (
+            <div className="text-sm space-y-0.5">
+              <p className="font-medium truncate" title={destinationDisplayName}>
+                Destination: {destinationDisplayName}
               </p>
-              {optimiserStream?.assigned_distance_km != null && (
-                <p className="text-muted-foreground text-xs tabular-nums">
-                  {optimiserStream.assigned_distance_km} km
-                  {optimiserStream.assigned_duration_min != null &&
-                    ` · ${Math.round(optimiserStream.assigned_duration_min)} min`}
-                </p>
-              )}
+              <p
+                className={cn(
+                  "text-xs tabular-nums",
+                  (plan.distance_km != null || optimiserStream?.assigned_distance_km != null) ? "text-muted-foreground" : "text-muted-foreground/80"
+                )}
+                title={
+                  (plan.distance_km != null || optimiserStream?.assigned_distance_km != null)
+                    ? undefined
+                    : "Select a facility or custom destination to calculate distance."
+                }
+              >
+                Distance:{" "}
+                {(plan.distance_km != null && Number.isFinite(plan.distance_km)) || (optimiserStream?.assigned_distance_km != null) ? (
+                  <>
+                    {(plan.distance_km ?? optimiserStream!.assigned_distance_km)!.toFixed(1)} km
+                    {(plan.duration_min != null || optimiserStream?.assigned_duration_min != null) &&
+                      ` · ${Math.round(plan.duration_min ?? optimiserStream?.assigned_duration_min ?? 0)} min`}
+                  </>
+                ) : (
+                  "—"
+                )}
+              </p>
             </div>
           ) : (
-            <div>
-              <p className="text-sm text-muted-foreground">No facility selected</p>
-              <Button
-                variant="outline"
-                size="sm"
-                className="mt-1"
-                onClick={() => top3[0] && onApplyFacility(plan.stream_name, top3[0].facility_id)}
-                disabled={!top3.length || applyFacilityStream !== null}
-              >
-                Choose facility
-              </Button>
+            <div className="space-y-2">
+              <p className="text-sm text-muted-foreground" title="Select a facility or custom destination to calculate distance.">
+                Destination: Not set
+              </p>
+              <p className="text-xs text-muted-foreground tabular-nums">Distance: —</p>
+              {!hasPartner ? (
+                <p className="text-xs text-muted-foreground">Select a Partner to see facility recommendations.</p>
+              ) : !recommendedFacility ? (
+                <p className="text-xs text-muted-foreground">No matching facilities for this stream.</p>
+              ) : (
+                <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/20 px-3 py-2">
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium text-muted-foreground">Recommended: {recommendedFacility.facility_name}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {recommendedFacility.distance_not_computed
+                        ? "distance not computed"
+                        : `${recommendedFacility.distance_km} km`}
+                    </p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => onApplyFacility(plan.stream_name, recommendedFacility.facility_id)}
+                    disabled={applyFacilityStream !== null}
+                  >
+                    Apply
+                  </Button>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -468,10 +555,22 @@ export function StreamPlanningCard({
           </SelectContent>
         </Select>
         <div className="ml-auto">
-          {hasFacility ? (
-            <Button variant="outline" size="sm" onClick={() => setSuggestedOpen((o) => !o)}>
-              Compare facilities
-            </Button>
+          {hasDestination ? (
+            <>
+              <Button variant="outline" size="sm" onClick={() => setCompareModalOpen(true)}>
+                Compare facilities
+              </Button>
+              <CompareFacilitiesModal
+                open={compareModalOpen}
+                onOpenChange={setCompareModalOpen}
+                streamName={plan.stream_name}
+                projectId={projectId}
+                defaultPartnerId={plan.partner_id}
+                onSelectFacility={(facilityId) => onApplyFacility(plan.stream_name, facilityId)}
+                applying={applyFacilityStream === plan.stream_name}
+                isSuperAdmin={isSuperAdmin}
+              />
+            </>
           ) : (
             <Button
               size="sm"
@@ -588,7 +687,7 @@ export interface StreamPlanningCardsProps {
   projectId: string;
   isSuperAdmin: boolean;
   applyFacilityStream: string | null;
-  getFacilityDisplayName: (plan: StreamPlanItem) => string;
+  getDestinationDisplay: (plan: StreamPlanItem, optimiserStream?: OptimiserStream | null) => string;
   onApplyFacility: (streamName: string, facilityId: string) => Promise<void>;
   onResetFacility?: (streamName: string) => Promise<void>;
   onRefetch: () => void;
@@ -606,7 +705,7 @@ export function StreamPlanningCards({
   projectId,
   isSuperAdmin,
   applyFacilityStream,
-  getFacilityDisplayName,
+  getDestinationDisplay,
   onApplyFacility,
   onResetFacility,
   onRefetch,
@@ -644,7 +743,7 @@ export function StreamPlanningCards({
             plan={plan}
             allStreamPlans={wasteStrategy.streamPlans}
             optimiserStream={optimiserStreams.find((s) => s.stream_name === plan.stream_name) ?? null}
-            facilityDisplayName={getFacilityDisplayName(plan)}
+            destinationDisplayName={getDestinationDisplay(plan, optimiserStreams.find((s) => s.stream_name === plan.stream_name) ?? null)}
             streamRecommendations={getRecommendationsForStream(wasteStrategy.recommendations, plan.stream_name)}
             projectId={projectId}
             distancesCached={optimiserData?.distances_cached ?? 0}

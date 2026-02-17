@@ -7,7 +7,18 @@ export type WasteStreamTypeRow = {
   name: string;
   category: string | null;
   sort_order: number;
+  key?: string;
 };
+
+function slugFromName(name: string): string {
+  return name
+    .toLowerCase()
+    .trim()
+    .replace(/\s*\/\s*/g, "-")
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "") || "stream";
+}
 
 /**
  * GET /api/catalog/waste-stream-types
@@ -25,7 +36,7 @@ export async function GET() {
 
   const { data: rows, error } = await supabase
     .from("waste_stream_types")
-    .select("id, name, category, sort_order")
+    .select("id, name, category, sort_order, key")
     .eq("is_active", true)
     .order("sort_order", { ascending: true })
     .order("name", { ascending: true });
@@ -64,7 +75,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  let body: { name?: string; category?: string | null };
+  let body: { name?: string; category?: string | null; key?: string };
   try {
     body = await req.json();
   } catch {
@@ -76,6 +87,8 @@ export async function POST(req: Request) {
   }
 
   const category = body?.category != null ? (typeof body.category === "string" ? body.category.trim() : null) : null;
+  let key = typeof body?.key === "string" ? body.key.trim() : "";
+  if (!key) key = slugFromName(name);
   const maxOrder = await supabase
     .from("waste_stream_types")
     .select("sort_order")
@@ -86,8 +99,8 @@ export async function POST(req: Request) {
 
   const { data: inserted, error } = await supabase
     .from("waste_stream_types")
-    .insert({ name, category, sort_order })
-    .select("id, name, category, sort_order")
+    .insert({ name, category, sort_order, key })
+    .select("id, name, category, sort_order, key")
     .single();
 
   if (error) {

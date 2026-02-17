@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { calcWasteKg, calcWasteQty, syncForecastAllocationToInputs } from "@/lib/forecastApi";
+import { calcWasteKg, calcWasteQty, getConversionOptions, syncForecastAllocationToInputs } from "@/lib/forecastApi";
 
 type ProjectIdParams = { params: Promise<{ id: string }> };
 
@@ -58,7 +58,7 @@ export async function GET(_req: Request, { params }: ProjectIdParams) {
 /**
  * POST /api/projects/:id/forecast-items
  * Create a forecast item. Recomputes computed_waste_qty, syncs allocation to inputs, returns item + stream totals.
- * Body: { item_name, quantity, unit?, excess_percent?, material_type?, material_type_id?, waste_stream_key? }
+ * Body: { item_name, quantity, unit?, excess_percent?, kg_per_m?, density_kg_m3?, allocated_stream_id?, waste_stream_key? }
  */
 export async function POST(req: Request, { params }: ProjectIdParams) {
   const { id: projectId } = await params;
@@ -72,8 +72,8 @@ export async function POST(req: Request, { params }: ProjectIdParams) {
     unit?: string;
     excess_percent?: number;
     kg_per_m?: number | null;
-    material_type?: string | null;
-    material_type_id?: string | null;
+    density_kg_m3?: number | null;
+    allocated_stream_id?: string | null;
     waste_stream_key?: string | null;
   };
   try {
@@ -98,12 +98,21 @@ export async function POST(req: Request, { params }: ProjectIdParams) {
 
   const unit = typeof body?.unit === "string" && body.unit.trim() ? body.unit.trim() : "tonne";
   const kg_per_m = body?.kg_per_m != null && Number.isFinite(Number(body.kg_per_m)) ? Number(body.kg_per_m) : null;
-  const computed_waste_qty = calcWasteQty(quantity, excess_percent);
-  const computed_waste_kg = calcWasteKg(quantity, excess_percent, unit, kg_per_m ?? undefined);
+  const density_kg_m3 = body?.density_kg_m3 != null && Number.isFinite(Number(body.density_kg_m3)) && Number(body.density_kg_m3) > 0 ? Number(body.density_kg_m3) : null;
+  const allocated_stream_id = typeof body?.allocated_stream_id === "string" && body.allocated_stream_id.trim() ? body.allocated_stream_id.trim() : null;
+  let waste_stream_key = body?.waste_stream_key != null ? (typeof body.waste_stream_key === "string" ? body.waste_stream_key.trim() || null : null) : null;
 
-  const material_type = body?.material_type != null ? (typeof body.material_type === "string" ? body.material_type.trim() || null : null) : null;
-  const material_type_id = body?.material_type_id != null && body.material_type_id ? String(body.material_type_id) : null;
-  const waste_stream_key = body?.waste_stream_key != null ? (typeof body.waste_stream_key === "string" ? body.waste_stream_key.trim() || null : null) : null;
+  if (allocated_stream_id && !waste_stream_key) {
+    const { data: stream } = await supabase.from("waste_streams").select("name").eq("id", allocated_stream_id).single();
+    if (stream?.name) waste_stream_key = String(stream.name).trim();
+  }
+
+  const conversionMap = await getConversionOptions(supabase);
+  const streamOpts = waste_stream_key ? conversionMap.get(waste_stream_key) : undefined;
+  const densityKgM3 = density_kg_m3 ?? (streamOpts?.densityKgM3 ?? null);
+  const kgPerM = kg_per_m ?? (streamOpts?.kgPerM ?? null);
+  const computed_waste_qty = calcWasteQty(quantity, excess_percent);
+  const computed_waste_kg = calcWasteKg(quantity, excess_percent, unit, kgPerM ?? undefined, densityKgM3 ?? undefined);
 
   const insertPayload: Record<string, unknown> = {
     project_id: projectId,
@@ -112,12 +121,11 @@ export async function POST(req: Request, { params }: ProjectIdParams) {
     unit,
     excess_percent: Number.isNaN(excess_percent) ? 0 : excess_percent,
     kg_per_m: kg_per_m ?? null,
-    material_type: material_type ?? null,
-    material_type_id: material_type_id ?? null,
+    density_kg_m3: density_kg_m3 ?? null,
+    allocated_stream_id: allocated_stream_id ?? null,
     waste_stream_key: waste_stream_key ?? null,
     computed_waste_qty,
   };
-  // Set computed_waste_kg when finite; omit so DB default 0 applies for non-weight
   if (computed_waste_kg != null && Number.isFinite(computed_waste_kg)) {
     insertPayload.computed_waste_kg = computed_waste_kg;
   }

@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
-import { ProjectContext, useProjectContext, type ProjectContextProject } from "./project-context";
+import { ProjectContext, PROJECT_SELECT_FIELDS, useProjectContext, type ProjectContextProject } from "./project-context";
 
 export default function ProjectLayout({
   children,
@@ -35,7 +35,7 @@ export default function ProjectLayout({
       setProjectError(null);
 
       const [projectRes, { count: forecastCountVal }] = await Promise.all([
-        supabase.from("projects").select("*").eq("id", projectId).single(),
+        supabase.from("projects").select(PROJECT_SELECT_FIELDS).eq("id", projectId).single(),
         supabase.from("project_forecast_items").select("*", { count: "exact", head: true }).eq("project_id", projectId),
       ]);
 

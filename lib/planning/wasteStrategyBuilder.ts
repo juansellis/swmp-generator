@@ -15,7 +15,7 @@ import {
   type Facility,
 } from "@/lib/facilities/getFacilities";
 import { getPartnerById } from "@/lib/partners/getPartners";
-import { calcWasteQty, toWasteKg } from "@/lib/forecastApi";
+import { calcWasteQty, getConversionOptions, toWasteKg } from "@/lib/forecastApi";
 import {
   getCostSavingPerTonnesDivertedFromLandfill,
   getCostSavingPerTonnesDivertedFromMixed,
@@ -50,6 +50,17 @@ export type StreamPlanItem = {
   recommended_handling: RecommendedHandling;
   /** User-assigned facility from inputs (plan.facility_id). Null if not set. */
   assigned_facility_id: string | null;
+  /** Destination type from inputs; used for strict destination display in Outputs. */
+  destination_mode: "facility" | "custom" | null;
+  /** Custom destination display (name or address) when destination_mode === 'custom'. */
+  custom_destination_name: string | null;
+  custom_destination_address: string | null;
+  /** Canonical effective distance (km) for this plan: from persisted plan.distance_km or project_facility_distances / project_custom_destination_distances. Used everywhere (cards, table, overview). */
+  distance_km: number | null;
+  /** Cached duration (min) when distance was computed. */
+  duration_min: number | null;
+  /** Effective partner for this stream (stream.partner_id ?? project.primary_waste_contractor_partner_id). Used for partner-based facility recommendation. */
+  partner_id: string | null;
   recommended_facility_id: string | null;
   recommended_facility_name: string | null;
   recommended_partner_id: string | null;
@@ -334,6 +345,36 @@ function buildStreamPlan(
       ? plan.handling_mode
       : "mixed";
   const assignedFacilityId = plan.facility_id != null && String(plan.facility_id).trim() !== "" ? String(plan.facility_id).trim() : null;
+  const destinationMode: "facility" | "custom" | null =
+    plan.destination_mode === "custom" || plan.destination_mode === "facility" ? plan.destination_mode : "facility";
+  const customName =
+    plan.custom_destination_name != null && String(plan.custom_destination_name).trim() !== ""
+      ? String(plan.custom_destination_name).trim()
+      : null;
+  const customAddress =
+    plan.custom_destination_address != null && String(plan.custom_destination_address).trim() !== ""
+      ? String(plan.custom_destination_address).trim()
+      : null;
+  const effectivePartnerId =
+    plan.partner_id != null && String(plan.partner_id).trim() !== ""
+      ? String(plan.partner_id).trim()
+      : plan.waste_contractor_partner_id != null && String(plan.waste_contractor_partner_id).trim() !== ""
+        ? String(plan.waste_contractor_partner_id).trim()
+        : projectPartnerId;
+
+  const planDistanceKm =
+    plan.distance_km != null && Number.isFinite(plan.distance_km) && plan.distance_km >= 0
+      ? plan.distance_km
+      : null;
+  const planDurationMin =
+    plan.duration_min != null && Number.isFinite(plan.duration_min) && plan.duration_min >= 0
+      ? plan.duration_min
+      : null;
+  const cacheDistanceM = assignedFacilityId ? distanceByFacilityId?.[assignedFacilityId] : null;
+  const distance_km =
+    planDistanceKm ??
+    (cacheDistanceM != null && Number.isFinite(cacheDistanceM) ? cacheDistanceM / 1000 : null);
+  const duration_min = planDurationMin ?? null;
 
   return {
     stream_id: streamName.replace(/\s+/g, "-").toLowerCase(),
@@ -344,6 +385,12 @@ function buildStreamPlan(
     handling_mode: handlingMode,
     recommended_handling: recommendedHandling,
     assigned_facility_id: assignedFacilityId,
+    destination_mode: destinationMode,
+    custom_destination_name: customName,
+    custom_destination_address: customAddress,
+    distance_km,
+    duration_min,
+    partner_id: effectivePartnerId ?? null,
     recommended_facility_id: facility?.id ?? null,
     recommended_facility_name: facility?.name ?? null,
     recommended_partner_id: partnerId ?? null,
@@ -858,11 +905,14 @@ async function getForecastCountsAndItems(
   conversion_required_count: number;
   items: ForecastItemForStrategy[];
 }> {
-  const { data: rows, error } = await supabase
-    .from("project_forecast_items")
-    .select("quantity, excess_percent, unit, kg_per_m, waste_stream_key, item_name")
-    .eq("project_id", projectId);
-
+  const [conversionMap, itemsResult] = await Promise.all([
+    getConversionOptions(supabase),
+    supabase
+      .from("project_forecast_items")
+      .select("quantity, excess_percent, unit, kg_per_m, waste_stream_key, item_name")
+      .eq("project_id", projectId),
+  ]);
+  const { data: rows, error } = itemsResult;
   if (error) return { unallocated_count: 0, conversion_required_count: 0, items: [] };
   const raw = (rows ?? []) as ForecastRow[];
   let unallocated = 0,
@@ -870,10 +920,11 @@ async function getForecastCountsAndItems(
   const items: ForecastItemForStrategy[] = [];
   for (const row of raw) {
     const streamKey = row.waste_stream_key != null && String(row.waste_stream_key).trim() !== "" ? String(row.waste_stream_key).trim() : null;
+    const streamOpts = streamKey ? conversionMap.get(streamKey) : undefined;
+    const kgPerM = row.kg_per_m != null && Number.isFinite(Number(row.kg_per_m)) ? Number(row.kg_per_m) : (streamOpts?.kgPerM ?? null);
+    const densityKgM3 = streamOpts?.densityKgM3 ?? null;
     const wasteQty = calcWasteQty(Number(row.quantity) ?? 0, Number(row.excess_percent) ?? 0);
-    const wasteKg = toWasteKg(wasteQty, (row.unit ?? "tonne").toString(), {
-      kgPerM: row.kg_per_m != null && Number.isFinite(Number(row.kg_per_m)) ? Number(row.kg_per_m) : null,
-    });
+    const wasteKg = toWasteKg(wasteQty, (row.unit ?? "tonne").toString(), { kgPerM, densityKgM3 });
     if (!streamKey) unallocated += 1;
     else if (wasteKg == null || !Number.isFinite(wasteKg)) conversionRequired += 1;
     items.push({

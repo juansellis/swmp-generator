@@ -50,8 +50,12 @@ type ProjectRow = {
   end_date: string | null; // ISO date
   main_contractor: string | null;
   swmp_owner: string | null;
+  primary_waste_contractor_partner_id: string | null;
   created_at: string;
 };
+
+/** Explicit select so primary_waste_contractor_partner_id and all list fields load (avoids stale/missing columns). */
+const PROJECTS_LIST_SELECT = "id, user_id, name, address, site_address, site_place_id, site_lat, site_lng, region, project_type, start_date, end_date, main_contractor, swmp_owner, primary_waste_contractor_partner_id, created_at";
 
 type UserView = {
   email: string | null;
@@ -214,7 +218,7 @@ export default function ProjectsPage() {
         // Now load projects (this MUST be awaited)
         const { data: projects, error: projectsErr } = await supabase
           .from("projects")
-          .select("*")
+          .select(PROJECTS_LIST_SELECT)
           .order("created_at", { ascending: false });
   
         console.log("[Projects] projects loaded", projects?.length ?? 0);
@@ -260,7 +264,7 @@ export default function ProjectsPage() {
 
     const { data, error } = await supabase
       .from("projects")
-      .select("*")
+      .select(PROJECTS_LIST_SELECT)
       .order("created_at", { ascending: false });
 
     if (error) {
