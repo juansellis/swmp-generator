@@ -17,6 +17,9 @@ import { Notice } from "@/components/notice";
 import { InputsSectionCard } from "@/components/inputs/section-card";
 import { FieldGroup } from "@/components/inputs/field-group";
 import { InputsSidebarNav } from "@/components/inputs/inputs-sidebar-nav";
+import { TextareaFieldWrapper } from "@/components/inputs/textarea-field-wrapper";
+import { SelectableOptionCard } from "@/components/inputs/selectable-option-card";
+import { RoleCard } from "@/components/inputs/role-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -61,6 +64,16 @@ import {
   Recycle,
   FileInput,
   ClipboardList,
+  FileText,
+  Receipt,
+  Camera,
+  CalendarDays,
+  MessageSquare,
+  Trash2,
+  Signpost,
+  ShieldAlert,
+  Package,
+  ClipboardCheck,
 } from "lucide-react";
 
 
@@ -1462,8 +1475,8 @@ export default function ProjectInputsPage() {
                 </FieldGroup>
 
                 <Accordion type="single" collapsible defaultValue="" className="w-full max-w-full overflow-hidden mt-6">
-          <AccordionItem value="report" className="border rounded-lg px-0 mb-2 overflow-hidden">
-            <AccordionTrigger className="flex w-full items-center justify-between rounded-lg border bg-muted/40 px-4 py-3 hover:bg-muted/60 transition-colors [&>svg]:shrink-0">
+          <AccordionItem value="report" className="border border-border/50 rounded-lg px-0 mb-2 overflow-hidden">
+            <AccordionTrigger className="flex w-full items-center justify-between rounded-lg border border-border/50 bg-muted/40 px-4 py-3 hover:bg-muted/60 transition-colors [&>svg]:shrink-0">
               <span className="flex flex-col items-start text-left gap-0.5">
                 <span className="text-base font-bold">Report Customisation</span>
                 <span className="text-sm text-muted-foreground">
@@ -1472,195 +1485,186 @@ export default function ProjectInputsPage() {
               </span>
             </AccordionTrigger>
             <AccordionContent>
-              <div className="mt-2 rounded-lg border bg-background p-4 w-full max-w-full overflow-hidden space-y-4">
-      {saveProjectError ? (
-        <Notice type="error" title="Error" message={saveProjectError} className="mb-4" />
-      ) : null}
-      {saveProjectMsg ? (
-        <Notice type="success" title="Success" message={saveProjectMsg} className="mb-4" />
-      ) : null}
-
-              {saveProjectError ? (
-                <Notice type="error" title="Error" message={saveProjectError} className="mb-4" />
-              ) : null}
-              {saveProjectMsg ? (
-                <Notice type="success" title="Success" message={saveProjectMsg} className="mb-4" />
-              ) : null}
-              <div className="space-y-4">
-            <div className="grid gap-2">
-              <Label className="font-semibold">Client name</Label>
-              <Input
-                value={projectClientName}
-                onChange={(e) => setProjectClientName(e.target.value)}
-              />
-            </div>
-
-            <div className="grid gap-3">
-              <Label className="font-semibold">Client logo (optional)</Label>
-
-              {clientLogoUrl ? (
-                <div className="w-full max-w-full rounded-lg border p-3 overflow-hidden">
-                  <div className="flex items-center gap-3 min-w-0 max-w-full">
-                    <div className="shrink-0 h-16 w-16 rounded-md border bg-white flex items-center justify-center overflow-hidden max-w-full">
-                      <img
-                        src={clientLogoUrl}
-                        alt="Client logo"
-                        className="h-full w-full max-w-full object-contain"
+              <div className="mt-2 px-1 space-y-6">
+                {saveProjectError ? (
+                  <Notice type="error" title="Error" message={saveProjectError} />
+                ) : null}
+                {saveProjectMsg ? (
+                  <Notice type="success" title="Success" message={saveProjectMsg} />
+                ) : null}
+                <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 lg:gap-8">
+                  <div className="space-y-6">
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium">Client name</Label>
+                      <Input
+                        value={projectClientName}
+                        onChange={(e) => setProjectClientName(e.target.value)}
+                        className="bg-background"
                       />
                     </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium">Current client logo</p>
-                      <p className="text-xs text-muted-foreground break-all">{clientLogoUrl}</p>
-                    </div>
-                    <div className="shrink-0">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={async () => {
-                          if (!projectId) return;
-                          setUploadingClientLogo(true);
-                          try {
-                            const { error } = await supabase
-                              .from("projects")
-                              .update({ client_logo_url: null })
-                              .eq("id", projectId);
-                            if (error) {
-                              setSaveProjectError(error.message);
-                            } else {
-                              setClientLogoUrl("");
-                              setSaveProjectMsg("Client logo removed.");
-                            }
-                          } catch (error: any) {
-                            setSaveProjectError(error?.message ?? "Failed to remove logo");
-                          } finally {
-                            setUploadingClientLogo(false);
-                          }
-                        }}
-                        disabled={uploadingClientLogo}
-                      >
-                        <XIcon className="size-4" />
-                        Remove
-                      </Button>
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium">Report title (optional)</Label>
+                      <Input
+                        value={reportTitle}
+                        onChange={(e) => setReportTitle(e.target.value)}
+                        placeholder="Leave blank to use default SWMP title"
+                        className="bg-background"
+                      />
                     </div>
                   </div>
-                </div>
-              ) : (
-                <div className="border-2 border-dashed rounded-lg p-6 text-center bg-muted/30">
-                  <UploadIcon className="size-8 mx-auto mb-2 text-muted-foreground" />
-                  <p className="text-sm text-muted-foreground mb-3">No client logo uploaded yet</p>
-                </div>
-              )}
-
-              {uploadingClientLogo && (
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">Uploading logo...</span>
-                    <span className="font-medium">{clientLogoUploadProgress}%</span>
+                  <div className="space-y-3">
+                    <Label className="text-sm font-medium">Client logo (optional)</Label>
+                    <div className="rounded-xl border border-border/40 bg-muted/20 p-4">
+                        {clientLogoUrl ? (
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                            <div className="shrink-0 h-20 w-20 rounded-lg border bg-white flex items-center justify-center overflow-hidden">
+                              <img
+                                src={clientLogoUrl}
+                                alt="Client logo"
+                                className="h-full w-full object-contain"
+                              />
+                            </div>
+                            <div className="min-w-0 flex-1 space-y-1">
+                              <p className="text-sm font-medium">Current client logo</p>
+                              <p className="text-xs text-muted-foreground truncate">{clientLogoUrl}</p>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="text-muted-foreground hover:text-foreground -ml-2"
+                                onClick={async () => {
+                                  if (!projectId) return;
+                                  setUploadingClientLogo(true);
+                                  try {
+                                    const { error } = await supabase
+                                      .from("projects")
+                                      .update({ client_logo_url: null })
+                                      .eq("id", projectId);
+                                    if (error) {
+                                      setSaveProjectError(error.message);
+                                    } else {
+                                      setClientLogoUrl("");
+                                      setSaveProjectMsg("Client logo removed.");
+                                    }
+                                  } catch (error: any) {
+                                    setSaveProjectError(error?.message ?? "Failed to remove logo");
+                                  } finally {
+                                    setUploadingClientLogo(false);
+                                  }
+                                }}
+                                disabled={uploadingClientLogo}
+                              >
+                                Remove
+                              </Button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="border border-dashed border-border/40 rounded-lg p-6 text-center bg-background/60">
+                            <UploadIcon className="size-8 mx-auto mb-2 text-muted-foreground" />
+                            <p className="text-sm text-muted-foreground mb-3">No client logo uploaded yet</p>
+                            <div className="flex flex-wrap items-center justify-center gap-2">
+                              <Input
+                                type="file"
+                                accept="image/*"
+                                onChange={(e) => {
+                                  const f = e.target.files?.[0];
+                                  if (f && projectId) {
+                                    handleClientLogoUpload(f);
+                                  }
+                                }}
+                                disabled={uploadingClientLogo}
+                                className="max-w-[200px]"
+                              />
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  const input = document.createElement("input");
+                                  input.type = "file";
+                                  input.accept = "image/*";
+                                  input.onchange = (e) => {
+                                    const f = (e.target as HTMLInputElement).files?.[0];
+                                    if (f && projectId) {
+                                      handleClientLogoUpload(f);
+                                    }
+                                  };
+                                  input.click();
+                                }}
+                                disabled={uploadingClientLogo}
+                              >
+                                <UploadIcon className="size-4 mr-1" />
+                                Choose file
+                              </Button>
+                            </div>
+                            <p className="text-xs text-muted-foreground mt-2">PNG, JPEG, SVG. Max ~2MB.</p>
+                          </div>
+                        )}
+                        {uploadingClientLogo && (
+                          <div className="space-y-2 mt-3">
+                            <div className="flex items-center justify-between text-sm">
+                              <span className="text-muted-foreground">Uploading…</span>
+                              <span className="font-medium">{clientLogoUploadProgress}%</span>
+                            </div>
+                            <div className="h-2 w-full bg-muted rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-primary transition-all duration-300"
+                                style={{ width: `${clientLogoUploadProgress}%` }}
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                  <div className="h-2 w-full bg-muted rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-primary transition-all duration-300"
-                      style={{ width: `${clientLogoUploadProgress}%` }}
-                    />
-                  </div>
-                </div>
-              )}
-
-              <div className="flex items-center gap-2">
-                <Input
-                  type="file"
-                  accept="image/*"
-                  onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    if (f && projectId) {
-                      handleClientLogoUpload(f);
-                    }
-                  }}
-                  disabled={uploadingClientLogo}
-                  className="flex-1"
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => {
-                    const input = document.createElement("input");
-                    input.type = "file";
-                    input.accept = "image/*";
-                    input.onchange = (e) => {
-                      const f = (e.target as HTMLInputElement).files?.[0];
-                      if (f && projectId) {
-                        handleClientLogoUpload(f);
+                  <Accordion type="single" collapsible defaultValue="" className="w-full">
+                    <AccordionItem value="advanced" className="border-0">
+                      <AccordionTrigger className="py-2 text-sm font-medium text-muted-foreground hover:text-foreground [&>svg]:shrink-0">
+                        Advanced
+                      </AccordionTrigger>
+                      <AccordionContent className="pb-0">
+                        <TextareaFieldWrapper
+                          label="Footer / disclaimer override (optional)"
+                          value={reportFooter}
+                          onChange={(e) => setReportFooter(e.target.value)}
+                          rows={3}
+                          maxWidth="max-w-3xl"
+                        />
+                      </AccordionContent>
+                    </AccordionItem>
+                  </Accordion>
+                <div className="pt-2">
+                  <Button
+                    type="button"
+                    variant="primary"
+                    size="default"
+                    onClick={async () => {
+                      setSaveProjectMsg(null);
+                      setSaveProjectError(null);
+                      if (!projectId) {
+                        setSaveProjectError("Missing project id.");
+                        return;
                       }
-                    };
-                    input.click();
-                  }}
-                  disabled={uploadingClientLogo}
-                >
-                  <UploadIcon className="size-4" />
-                  Choose File
-                </Button>
+                      const { error } = await supabase
+                        .from("projects")
+                        .update({
+                          client_name: projectClientName || null,
+                          client_logo_url: clientLogoUrl || null,
+                          report_title: reportTitle || null,
+                          report_footer_override: reportFooter || null,
+                        })
+                        .eq("id", projectId);
+                      if (error) {
+                        setSaveProjectError(error.message);
+                        return;
+                      }
+                      setSaveProjectMsg("Saved report settings.");
+                    }}
+                  >
+                    Save report settings
+                  </Button>
+                </div>
               </div>
-              <p className="text-xs text-muted-foreground">
-                Supported formats: PNG, JPEG, SVG. Maximum file size recommended: 2MB.
-              </p>
-            </div>
-
-            <div className="grid gap-2">
-              <Label className="font-semibold">Report title (optional)</Label>
-              <Input
-                value={reportTitle}
-                onChange={(e) => setReportTitle(e.target.value)}
-                placeholder="Leave blank to use default SWMP title"
-              />
-            </div>
-
-            <div className="grid gap-2">
-              <Label className="font-semibold">Footer / disclaimer override (optional)</Label>
-              <Textarea
-                value={reportFooter}
-                onChange={(e) => setReportFooter(e.target.value)}
-                rows={3}
-              />
-            </div>
-
-            <div className="pt-2">
-              <Button
-                type="button"
-                variant="primary"
-                size="default"
-                className="w-full max-w-full"
-                onClick={async () => {
-                  setSaveProjectMsg(null);
-                  setSaveProjectError(null);
-
-                  if (!projectId) {
-                    setSaveProjectError("Missing project id.");
-                    return;
-                  }
-
-                  const { error } = await supabase
-                    .from("projects")
-                    .update({
-                      client_name: projectClientName || null,
-                      client_logo_url: clientLogoUrl || null,
-                      report_title: reportTitle || null,
-                      report_footer_override: reportFooter || null,
-                    })
-                    .eq("id", projectId);
-
-                  if (error) {
-                    setSaveProjectError(error.message);
-                    return;
-                  }
-                  setSaveProjectMsg("Saved report settings.");
-                }}
-              >
-                Save report settings
-              </Button>
-            </div>
-            </div>
-          </div>
             </AccordionContent>
           </AccordionItem>
         </Accordion>
@@ -3090,7 +3094,7 @@ export default function ProjectInputsPage() {
 
                 <p className="text-sm text-muted-foreground mt-4 mb-2">Advanced options</p>
                 <Accordion type="single" collapsible defaultValue="" className="w-full max-w-full overflow-hidden">
-              <AccordionItem value="monitoring" className="border rounded-lg px-0 mb-2 overflow-hidden">
+              <AccordionItem value="monitoring" className="border border-border/50 rounded-lg px-0 mb-2 overflow-hidden">
                 <AccordionTrigger className="w-full px-4 py-4 bg-muted/40 hover:bg-muted/60 transition-colors [&[data-state=open]]:bg-muted/60 rounded-t-lg data-[state=open]:rounded-b-none [&>svg]:shrink-0">
                   <span className="flex flex-col items-start text-left gap-0.5">
                     <span className="font-semibold text-lg">Monitoring & Reporting</span>
@@ -3100,83 +3104,80 @@ export default function ProjectInputsPage() {
                   </span>
                 </AccordionTrigger>
                 <AccordionContent className="px-4 pb-4">
-            <div className="space-y-4">
-              <div className="grid gap-2 max-w-sm">
-                <Label>Monitoring & reporting cadence</Label>
-                <Select
-                value={reportingCadence}
-                onValueChange={(v) => setReportingCadence(v as any)}
-                disabled={saveLoading}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Weekly">Weekly</SelectItem>
-                  <SelectItem value="Fortnightly">Fortnightly</SelectItem>
-                  <SelectItem value="Monthly">Monthly</SelectItem>
-                </SelectContent>
-              </Select>
-              </div>
-
-              <SubPanel className="space-y-4">
-                <Label className="font-semibold">Monitoring evidence</Label>
-              <p className="text-sm text-muted-foreground">
-              Choose how you’ll evidence waste movements and performance.
-              </p>
-
-              <div className="grid gap-3 sm:grid-cols-2">
-                {MONITORING_METHOD_OPTIONS.map((m) => (
-                  <div key={m} className="flex items-center gap-2">
-                    <Checkbox
-                      checked={monitoringMethods.includes(m)}
-                      onCheckedChange={() =>
-                        toggleInList(m, monitoringMethods, setMonitoringMethods)
-                      }
+                  <div className="space-y-6">
+                    <div className="flex flex-wrap items-center gap-4">
+                      <Label className="text-sm font-medium">Monitoring & reporting cadence</Label>
+                      <Select
+                        value={reportingCadence}
+                        onValueChange={(v) => setReportingCadence(v as any)}
+                        disabled={saveLoading}
+                      >
+                        <SelectTrigger className="w-[140px] h-9 border-border/50">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Weekly">Weekly</SelectItem>
+                          <SelectItem value="Fortnightly">Fortnightly</SelectItem>
+                          <SelectItem value="Monthly">Monthly</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground mb-3">Choose how you will evidence waste movements and performance.</p>
+                      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                      {MONITORING_METHOD_OPTIONS.map((m) => (
+                        <SelectableOptionCard
+                          key={m}
+                          checked={monitoringMethods.includes(m)}
+                          onCheckedChange={() =>
+                            toggleInList(m, monitoringMethods, setMonitoringMethods)
+                          }
+                          label={m}
+                          accentColor="blue"
+                          disabled={saveLoading}
+                          icon={
+                            m === "Dockets" ? <FileText className="size-4" /> :
+                            m === "Invoices/receipts" ? <Receipt className="size-4" /> :
+                            m === "Photos" ? <Camera className="size-4" /> :
+                            m === "Monthly reporting" ? <CalendarDays className="size-4" /> :
+                            m === "Toolbox talks" ? <MessageSquare className="size-4" /> : null
+                          }
+                        />
+                      ))}
+                    </div>
+                    </div>
+                    <Separator className="border-border/50" />
+                    <div className="flex flex-wrap items-center justify-between gap-4 py-2">
+                      <Label className="text-sm font-medium">We use software to track waste</Label>
+                      <Switch
+                        checked={usesSoftware}
+                        onCheckedChange={() => setUsesSoftware((v) => !v)}
+                        disabled={saveLoading}
+                        className="data-[state=checked]:bg-primary"
+                      />
+                    </div>
+                    {usesSoftware && (
+                      <Input
+                        value={softwareName}
+                        onChange={(e) => setSoftwareName(e.target.value)}
+                        placeholder="Software name (e.g. WasteX / Excel)"
+                        disabled={saveLoading}
+                        className="max-w-xs bg-muted/30 rounded-lg border-border/50"
+                      />
+                    )}
+                    <TextareaFieldWrapper
+                      label="Dockets / receipts description"
+                      value={docketsDescription}
+                      onChange={(e) => setDocketsDescription(e.target.value)}
+                      rows={3}
                       disabled={saveLoading}
+                      maxWidth="max-w-3xl"
                     />
-                    <Label className="font-normal">{m}</Label>
                   </div>
-                ))}
-              </div>
-
-              <div className="space-y-2">
-                <div className="flex items-center justify-between rounded-lg border border-input p-3 bg-card">
-                  <Label className="font-normal">We use software to track waste</Label>
-                  <Switch
-                    checked={usesSoftware}
-                    onCheckedChange={() => setUsesSoftware((v) => !v)}
-                    disabled={saveLoading}
-                    className="data-[state=checked]:bg-primary data-[state=unchecked]:bg-muted border border-input data-[state=checked]:border-primary data-[state=unchecked]:border-border"
-                  />
-                </div>
-                {usesSoftware && (
-                  <Input
-                    value={softwareName}
-                    onChange={(e) => setSoftwareName(e.target.value)}
-                    placeholder="Software name (e.g. WasteX / Excel )"
-                    disabled={saveLoading}
-                    className="mt-2"
-                  />
-                )}
-              </div>
-
-              <div className="grid gap-2">
-                <Label>Dockets / receipts description</Label>
-                <Textarea
-                  value={docketsDescription}
-                  onChange={(e) => setDocketsDescription(e.target.value)}
-                  rows={3}
-                  disabled={saveLoading}
-                />
-              </div>
-
-            </SubPanel>
-            </div>
                 </AccordionContent>
               </AccordionItem>
 
-              <AccordionItem value="site-controls" className="border rounded-lg px-0 mb-2 overflow-hidden">
+              <AccordionItem value="site-controls" className="border border-border/50 rounded-lg px-0 mb-2 overflow-hidden">
                 <AccordionTrigger className="w-full px-4 py-4 bg-muted/40 hover:bg-muted/60 transition-colors [&[data-state=open]]:bg-muted/60 rounded-t-lg data-[state=open]:rounded-b-none [&>svg]:shrink-0">
                   <span className="flex flex-col items-start text-left gap-0.5">
                     <span className="font-semibold text-lg">Site controls</span>
@@ -3186,54 +3187,94 @@ export default function ProjectInputsPage() {
                   </span>
                 </AccordionTrigger>
                 <AccordionContent className="px-4 pb-4">
-                  <div className="rounded-lg border bg-background p-4 w-full max-w-full overflow-hidden space-y-4">
-                    <p className="text-sm text-muted-foreground">
-                      Describe how bins, signage, and contamination/hazard controls will be managed on site. These appear in the generated SWMP.
-                    </p>
-                    <div className="grid gap-2">
-                      <Label className="font-semibold">Bin setup</Label>
-                      <p className="text-xs text-muted-foreground">How bins/skips will be provided and positioned.</p>
-                      <Textarea
-                        value={siteControls.bin_setup}
-                        onChange={(e) => setSiteControls((prev) => ({ ...prev, bin_setup: e.target.value }))}
-                        rows={2}
-                        disabled={saveLoading}
-                        placeholder={DEFAULT_SITE_CONTROLS.bin_setup}
-                      />
-                    </div>
-                    <div className="grid gap-2">
-                      <Label className="font-semibold">Signage &amp; storage</Label>
-                      <p className="text-xs text-muted-foreground">Signage at bin locations and secure storage.</p>
-                      <Textarea
-                        value={siteControls.signage_storage}
-                        onChange={(e) => setSiteControls((prev) => ({ ...prev, signage_storage: e.target.value }))}
-                        rows={2}
-                        disabled={saveLoading}
-                        placeholder={DEFAULT_SITE_CONTROLS.signage_storage}
-                      />
-                    </div>
-                    <div className="grid gap-2">
-                      <Label className="font-semibold">Contamination controls</Label>
-                      <p className="text-xs text-muted-foreground">Checks and re-sorting to prevent cross-contamination.</p>
-                      <Textarea
-                        value={siteControls.contamination_controls}
-                        onChange={(e) => setSiteControls((prev) => ({ ...prev, contamination_controls: e.target.value }))}
-                        rows={2}
-                        disabled={saveLoading}
-                        placeholder={DEFAULT_SITE_CONTROLS.contamination_controls}
-                      />
-                    </div>
-                    <div className="grid gap-2">
-                      <Label className="font-semibold">Hazardous controls</Label>
-                      <p className="text-xs text-muted-foreground">Separation, containment, and removal of hazardous materials.</p>
-                      <Textarea
-                        value={siteControls.hazardous_controls}
-                        onChange={(e) => setSiteControls((prev) => ({ ...prev, hazardous_controls: e.target.value }))}
-                        rows={2}
-                        disabled={saveLoading}
-                        placeholder={DEFAULT_SITE_CONTROLS.hazardous_controls}
-                      />
-                    </div>
+                  <div className="space-y-6">
+                    <p className="text-sm text-muted-foreground">Describe how bins, signage, and contamination/hazard controls will be managed on site. These appear in the generated SWMP.</p>
+                    <Accordion type="single" collapsible className="w-full space-y-2">
+                      <AccordionItem value="bin_setup" className="rounded-lg border border-border/50 overflow-hidden bg-card">
+                        <AccordionTrigger className="px-4 py-3 hover:no-underline [&>svg]:shrink-0">
+                          <span className="flex items-center gap-3">
+                            <Package className="size-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                            <span className="text-left">
+                              <span className="font-medium block">Bin setup</span>
+                              <span className="text-xs text-muted-foreground font-normal">How bins/skips will be provided and positioned.</span>
+                            </span>
+                          </span>
+                        </AccordionTrigger>
+                        <AccordionContent className="px-4 pb-4 pt-0">
+                          <Textarea
+                            value={siteControls.bin_setup}
+                            onChange={(e) => setSiteControls((prev) => ({ ...prev, bin_setup: e.target.value }))}
+                            rows={2}
+                            disabled={saveLoading}
+                            placeholder={DEFAULT_SITE_CONTROLS.bin_setup}
+                            className="bg-muted/30 rounded-lg focus:ring-2 focus:ring-primary/20 border-border max-w-3xl"
+                          />
+                        </AccordionContent>
+                      </AccordionItem>
+                      <AccordionItem value="signage_storage" className="rounded-lg border border-border/50 overflow-hidden bg-card">
+                        <AccordionTrigger className="px-4 py-3 hover:no-underline [&>svg]:shrink-0">
+                          <span className="flex items-center gap-3">
+                            <Signpost className="size-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                            <span className="text-left">
+                              <span className="font-medium block">Signage & storage</span>
+                              <span className="text-xs text-muted-foreground font-normal">Signage at bin locations and secure storage.</span>
+                            </span>
+                          </span>
+                        </AccordionTrigger>
+                        <AccordionContent className="px-4 pb-4 pt-0">
+                          <Textarea
+                            value={siteControls.signage_storage}
+                            onChange={(e) => setSiteControls((prev) => ({ ...prev, signage_storage: e.target.value }))}
+                            rows={2}
+                            disabled={saveLoading}
+                            placeholder={DEFAULT_SITE_CONTROLS.signage_storage}
+                            className="bg-muted/30 rounded-lg focus:ring-2 focus:ring-primary/20 border-border max-w-3xl"
+                          />
+                        </AccordionContent>
+                      </AccordionItem>
+                      <AccordionItem value="contamination_controls" className="rounded-lg border border-border/50 overflow-hidden bg-card">
+                        <AccordionTrigger className="px-4 py-3 hover:no-underline [&>svg]:shrink-0">
+                          <span className="flex items-center gap-3">
+                            <Trash2 className="size-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                            <span className="text-left">
+                              <span className="font-medium block">Contamination controls</span>
+                              <span className="text-xs text-muted-foreground font-normal">Checks and re-sorting to prevent cross-contamination.</span>
+                            </span>
+                          </span>
+                        </AccordionTrigger>
+                        <AccordionContent className="px-4 pb-4 pt-0">
+                          <Textarea
+                            value={siteControls.contamination_controls}
+                            onChange={(e) => setSiteControls((prev) => ({ ...prev, contamination_controls: e.target.value }))}
+                            rows={2}
+                            disabled={saveLoading}
+                            placeholder={DEFAULT_SITE_CONTROLS.contamination_controls}
+                            className="bg-muted/30 rounded-lg focus:ring-2 focus:ring-primary/20 border-border max-w-3xl"
+                          />
+                        </AccordionContent>
+                      </AccordionItem>
+                      <AccordionItem value="hazardous_controls" className="rounded-lg border border-border/50 overflow-hidden bg-card">
+                        <AccordionTrigger className="px-4 py-3 hover:no-underline [&>svg]:shrink-0">
+                          <span className="flex items-center gap-3">
+                            <ShieldAlert className="size-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                            <span className="text-left">
+                              <span className="font-medium block">Hazardous controls</span>
+                              <span className="text-xs text-muted-foreground font-normal">Separation, containment, and removal of hazardous materials.</span>
+                            </span>
+                          </span>
+                        </AccordionTrigger>
+                        <AccordionContent className="px-4 pb-4 pt-0">
+                          <Textarea
+                            value={siteControls.hazardous_controls}
+                            onChange={(e) => setSiteControls((prev) => ({ ...prev, hazardous_controls: e.target.value }))}
+                            rows={2}
+                            disabled={saveLoading}
+                            placeholder={DEFAULT_SITE_CONTROLS.hazardous_controls}
+                            className="bg-muted/30 rounded-lg focus:ring-2 focus:ring-primary/20 border-border max-w-3xl"
+                          />
+                        </AccordionContent>
+                      </AccordionItem>
+                    </Accordion>
                   </div>
                 </AccordionContent>
               </AccordionItem>
@@ -3250,7 +3291,7 @@ export default function ProjectInputsPage() {
                 variant="grouped"
               >
                 <Accordion type="single" collapsible defaultValue="" className="w-full max-w-full overflow-hidden">
-              <AccordionItem value="responsibilities" className="border rounded-lg px-0 mb-2 overflow-hidden">
+              <AccordionItem value="responsibilities" className="border border-border/50 rounded-lg px-0 mb-2 overflow-hidden">
                 <AccordionTrigger className="w-full px-4 py-4 bg-muted/40 hover:bg-muted/60 transition-colors [&[data-state=open]]:bg-muted/60 rounded-t-lg data-[state=open]:rounded-b-none [&>svg]:shrink-0">
                   <span className="flex flex-col items-start text-left gap-0.5">
                     <span className="font-semibold text-lg">Responsibilities</span>
@@ -3260,170 +3301,169 @@ export default function ProjectInputsPage() {
                   </span>
                 </AccordionTrigger>
                 <AccordionContent className="px-4 pb-4">
-            <SubPanel className="space-y-4 bg-muted/30">
-              <Label className="font-semibold block">Responsibilities (editable)</Label>
-              <p className="text-sm text-muted-foreground">
-                Edit roles, parties, and responsibility text. These appear in the generated SWMP.
-              </p>
-              {responsibilities.map((r, idx) => (
-                <SubPanel key={idx} className="space-y-3">
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <div className="grid gap-2">
-                      <Label>Role</Label>
-                      <Input
-                        value={r.role}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          setResponsibilities((prev) =>
-                            prev.map((p, i) => (i === idx ? { ...p, role: v } : p))
-                          );
-                        }}
-                        placeholder="e.g. SWMP Owner"
-                        disabled={saveLoading}
-                      />
-                    </div>
-                    <div className="grid gap-2">
-                      <Label>Party / name</Label>
-                      <Input
-                        value={r.party}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          setResponsibilities((prev) =>
-                            prev.map((p, i) => (i === idx ? { ...p, party: v } : p))
-                          );
-                        }}
-                        placeholder="e.g. Main Contractor"
-                        disabled={saveLoading}
-                      />
-                    </div>
-                  </div>
-                  <div className="grid gap-2">
-                    <Label>Responsibilities (one per line)</Label>
-                    <Textarea
-                      value={r.responsibilities.join("\n")}
-                      onChange={(e) => {
-                        const lines = e.target.value.split("\n").map((s) => s.trim()).filter(Boolean);
-                        setResponsibilities((prev) =>
-                          prev.map((p, i) => (i === idx ? { ...p, responsibilities: lines } : p))
-                        );
-                      }}
-                      rows={3}
-                      placeholder="Maintain SWMP\nCoordinate waste streams"
-                      disabled={saveLoading}
-                    />
-                  </div>
-                </SubPanel>
-              ))}
-              <SubPanel className="space-y-4 mt-4">
-                <Label className="font-semibold block">Additional people</Label>
-                <p className="text-sm text-muted-foreground">
-                  Add any extra roles (name, role, optional contact, responsibilities).
-                </p>
-                {additionalResponsibilities.map((a, idx) => (
-                  <div key={idx} className="border rounded-lg p-4 bg-muted/30 space-y-3">
-                    <div className="flex justify-end">
+                  <div className="space-y-6">
+                    <div className="flex flex-wrap items-center justify-between gap-4">
+                      <p className="text-sm text-muted-foreground">Edit roles, parties, and responsibility text. These appear in the generated SWMP.</p>
                       <Button
                         type="button"
-                        variant="ghost"
+                        variant="outline"
                         size="sm"
                         onClick={() =>
-                          setAdditionalResponsibilities((prev) => prev.filter((_, i) => i !== idx))
+                          setAdditionalResponsibilities((prev) => [...prev, { name: "", role: "", responsibilities: "" }])
                         }
                         disabled={saveLoading}
-                        className="text-destructive hover:text-destructive"
                       >
-                        <XIcon className="size-4 mr-1" />
-                        Remove
+                        + Add role
                       </Button>
                     </div>
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <div className="grid gap-2">
-                        <Label>Name</Label>
-                        <Input
-                          value={a.name}
-                          onChange={(e) =>
-                            setAdditionalResponsibilities((prev) =>
-                              prev.map((p, i) => (i === idx ? { ...p, name: e.target.value } : p))
+                    <div className="space-y-3">
+                      {responsibilities.map((r, idx) => (
+                        <RoleCard
+                          key={idx}
+                          value={`role-${idx}`}
+                          role={r.role}
+                          party={r.party}
+                          responsibilities={r.responsibilities}
+                          onRoleChange={(v) =>
+                            setResponsibilities((prev) =>
+                              prev.map((p, i) => (i === idx ? { ...p, role: v } : p))
                             )
                           }
-                          placeholder="Full name"
-                          disabled={saveLoading}
-                        />
-                      </div>
-                      <div className="grid gap-2">
-                        <Label>Role</Label>
-                        <Input
-                          value={a.role}
-                          onChange={(e) =>
-                            setAdditionalResponsibilities((prev) =>
-                              prev.map((p, i) => (i === idx ? { ...p, role: e.target.value } : p))
+                          onPartyChange={(v) =>
+                            setResponsibilities((prev) =>
+                              prev.map((p, i) => (i === idx ? { ...p, party: v } : p))
                             )
                           }
-                          placeholder="e.g. Site foreman"
-                          disabled={saveLoading}
-                        />
-                      </div>
-                      <div className="grid gap-2">
-                        <Label>Email (optional)</Label>
-                        <Input
-                          type="email"
-                          value={a.email ?? ""}
-                          onChange={(e) =>
-                            setAdditionalResponsibilities((prev) =>
-                              prev.map((p, i) => (i === idx ? { ...p, email: e.target.value || undefined } : p))
+                          onResponsibilitiesChange={(lines) =>
+                            setResponsibilities((prev) =>
+                              prev.map((p, i) => (i === idx ? { ...p, responsibilities: lines } : p))
                             )
                           }
-                          placeholder="email@example.com"
                           disabled={saveLoading}
-                        />
-                      </div>
-                      <div className="grid gap-2">
-                        <Label>Phone (optional)</Label>
-                        <Input
-                          value={a.phone ?? ""}
-                          onChange={(e) =>
-                            setAdditionalResponsibilities((prev) =>
-                              prev.map((p, i) => (i === idx ? { ...p, phone: e.target.value || undefined } : p))
-                            )
+                          defaultOpen={idx === 0}
+                          icon={
+                            idx === 0 ? <ClipboardCheck className="size-4 text-emerald-600 dark:text-emerald-400" /> :
+                            idx === 1 ? <Building2 className="size-4 text-emerald-600 dark:text-emerald-400" /> :
+                            <Users className="size-4 text-emerald-600 dark:text-emerald-400" />
                           }
-                          placeholder=""
-                          disabled={saveLoading}
                         />
-                      </div>
+                      ))}
                     </div>
-                    <div className="grid gap-2">
-                      <Label>Responsibilities</Label>
-                      <Textarea
-                        value={a.responsibilities}
-                        onChange={(e) =>
-                          setAdditionalResponsibilities((prev) =>
-                            prev.map((p, i) => (i === idx ? { ...p, responsibilities: e.target.value } : p))
-                          )
-                        }
-                        rows={2}
-                        placeholder="Duties for this role"
-                        disabled={saveLoading}
-                      />
-                    </div>
+                    {additionalResponsibilities.length > 0 ? (
+                      <div className="space-y-3 pt-2 border-t border-border/50">
+                        <p className="text-sm font-medium text-muted-foreground">Additional people</p>
+                        {additionalResponsibilities.map((a, idx) => (
+                          <div key={idx} className="rounded-lg border border-border/50 overflow-hidden bg-card">
+                            <Accordion type="single" collapsible defaultValue="" className="w-full">
+                              <AccordionItem value="additional" className="border-0">
+                                <AccordionTrigger className="px-4 py-3 hover:no-underline [&>svg]:shrink-0">
+                                  <span className="flex items-center justify-between w-full pr-2">
+                                    <span className="text-sm font-medium truncate">{a.role || "New role"}</span>
+                                    <span className="flex items-center gap-2 shrink-0">
+                                      <Badge variant="secondary" className="font-normal">{a.name || "—"}</Badge>
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-7 w-7 p-0 text-destructive hover:text-destructive"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setAdditionalResponsibilities((prev) => prev.filter((_, i) => i !== idx));
+                                        }}
+                                        disabled={saveLoading}
+                                        aria-label="Remove role"
+                                      >
+                                        <XIcon className="size-4" />
+                                      </Button>
+                                    </span>
+                                  </span>
+                                </AccordionTrigger>
+                                <AccordionContent className="px-4 pb-4 pt-0">
+                                  <div className="grid gap-4 sm:grid-cols-2">
+                                    <div className="space-y-2">
+                                      <Label className="text-sm font-medium">Name</Label>
+                                      <Input
+                                        value={a.name}
+                                        onChange={(e) =>
+                                          setAdditionalResponsibilities((prev) =>
+                                            prev.map((p, i) => (i === idx ? { ...p, name: e.target.value } : p))
+                                          )
+                                        }
+                                        placeholder="Full name"
+                                        disabled={saveLoading}
+                                        className="bg-background"
+                                      />
+                                    </div>
+                                    <div className="space-y-2">
+                                      <Label className="text-sm font-medium">Role</Label>
+                                      <Input
+                                        value={a.role}
+                                        onChange={(e) =>
+                                          setAdditionalResponsibilities((prev) =>
+                                            prev.map((p, i) => (i === idx ? { ...p, role: e.target.value } : p))
+                                          )
+                                        }
+                                        placeholder="e.g. Site foreman"
+                                        disabled={saveLoading}
+                                        className="bg-background"
+                                      />
+                                    </div>
+                                    <div className="space-y-2 sm:col-span-2">
+                                      <Label className="text-sm font-medium">Email (optional)</Label>
+                                      <Input
+                                        type="email"
+                                        value={a.email ?? ""}
+                                        onChange={(e) =>
+                                          setAdditionalResponsibilities((prev) =>
+                                            prev.map((p, i) => (i === idx ? { ...p, email: e.target.value || undefined } : p))
+                                          )
+                                        }
+                                        placeholder="email@example.com"
+                                        disabled={saveLoading}
+                                        className="bg-background"
+                                      />
+                                    </div>
+                                    <div className="space-y-2 sm:col-span-2">
+                                      <Label className="text-sm font-medium">Phone (optional)</Label>
+                                      <Input
+                                        value={a.phone ?? ""}
+                                        onChange={(e) =>
+                                          setAdditionalResponsibilities((prev) =>
+                                            prev.map((p, i) => (i === idx ? { ...p, phone: e.target.value || undefined } : p))
+                                          )
+                                        }
+                                        disabled={saveLoading}
+                                        className="bg-background"
+                                      />
+                                    </div>
+                                  </div>
+                                  <div className="space-y-2 mt-4">
+                                    <Label className="text-sm font-medium">Responsibilities</Label>
+                                    <Textarea
+                                      value={a.responsibilities}
+                                      onChange={(e) =>
+                                        setAdditionalResponsibilities((prev) =>
+                                          prev.map((p, i) => (i === idx ? { ...p, responsibilities: e.target.value } : p))
+                                        )
+                                      }
+                                      rows={2}
+                                      placeholder="Duties for this role"
+                                      disabled={saveLoading}
+                                      className="bg-muted/30 rounded-lg focus:ring-2 focus:ring-primary/20 border-border"
+                                    />
+                                  </div>
+                                </AccordionContent>
+                              </AccordionItem>
+                            </Accordion>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
                   </div>
-                ))}
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() =>
-                    setAdditionalResponsibilities((prev) => [...prev, { name: "", role: "", responsibilities: "" }])
-                  }
-                  disabled={saveLoading}
-                >
-                  Add person
-                </Button>
-            </SubPanel>
-            </SubPanel>
                 </AccordionContent>
               </AccordionItem>
 
-              <AccordionItem value="notes" className="border rounded-lg px-0 mb-2 overflow-hidden">
+              <AccordionItem value="notes" className="border border-border/50 rounded-lg px-0 mb-2 overflow-hidden">
                 <AccordionTrigger className="w-full px-4 py-4 bg-muted/40 hover:bg-muted/60 transition-colors [&[data-state=open]]:bg-muted/60 rounded-t-lg data-[state=open]:rounded-b-none [&>svg]:shrink-0">
                   <span className="flex flex-col items-start text-left gap-0.5">
                     <span className="font-semibold text-lg">Notes / Additional Context</span>
@@ -3433,18 +3473,18 @@ export default function ProjectInputsPage() {
                   </span>
                 </AccordionTrigger>
                 <AccordionContent className="px-4 pb-4">
-            <SubPanel>
-              <div className="grid gap-2">
-                <Label>Additional notes (optional)</Label>
-                <Textarea
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  placeholder="Anything site-specific that should be reflected in the SWMP."
-                  disabled={saveLoading}
-                  rows={4}
-                />
-              </div>
-            </SubPanel>
+                  <div className="space-y-6 max-w-2xl">
+                    <p className="text-sm text-muted-foreground">Use this space for project-specific conditions or council requirements.</p>
+                    <TextareaFieldWrapper
+                      label="Additional notes (optional)"
+                      value={notes}
+                      onChange={(e) => setNotes(e.target.value)}
+                      placeholder="Anything site-specific that should be reflected in the SWMP."
+                      disabled={saveLoading}
+                      rows={4}
+                      maxWidth="full"
+                    />
+                  </div>
                 </AccordionContent>
               </AccordionItem>
             </Accordion>
