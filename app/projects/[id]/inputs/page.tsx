@@ -8,8 +8,11 @@ import { useProjectContext, PROJECT_SELECT_FIELDS } from "../project-context";
 
 import { AppShell } from "@/components/app-shell";
 import { SubPanel } from "@/components/form-section";
-import { PageHeader } from "@/components/page-header";
 import { ProjectHeader } from "@/components/project-header";
+import { InputsPageHeader } from "@/components/inputs/inputs-page-header";
+import { ProjectSummaryStrip } from "@/components/inputs/project-summary-strip";
+import { StreamRow } from "@/components/inputs/stream-row";
+import { MaterialRow } from "@/components/inputs/material-row";
 import { Notice } from "@/components/notice";
 import { InputsSectionCard } from "@/components/inputs/section-card";
 import { FieldGroup } from "@/components/inputs/field-group";
@@ -311,6 +314,7 @@ import type { ProjectStatusData } from "@/lib/projectStatus";
 import { ProjectStatusPills } from "@/components/project-status-pills";
 import { StickyActionBar } from "@/components/sticky-action-bar";
 import { SmartHint } from "@/components/smart-hint";
+import { Skeleton } from "@/components/ui/skeleton";
 
 const DEFAULT_STATUS: ProjectStatusData = {
   inputs_complete: false,
@@ -1249,19 +1253,23 @@ export default function ProjectInputsPage() {
   if (loading) {
     return (
       <AppShell>
-        <div className="space-y-6 max-w-6xl mx-auto px-4">
-          <div className="h-8 w-48 animate-pulse rounded bg-muted/80" />
+        <div className="max-w-6xl mx-auto px-4 space-y-8">
+          <div className="space-y-3">
+            <Skeleton className="h-4 w-64" />
+            <Skeleton className="h-8 w-48" />
+          </div>
+          <Skeleton className="h-14 w-full rounded-xl" />
           <div className="flex gap-8">
-            <div className="w-52 space-y-2">
+            <aside className="hidden lg:block w-52 space-y-2">
               {[1, 2, 3, 4, 5, 6].map((i) => (
-                <div key={i} className="h-9 w-full animate-pulse rounded bg-muted/80" />
+                <Skeleton key={i} className="h-9 w-full rounded-md" />
               ))}
-            </div>
-            <div className="flex-1 space-y-10">
-              {[1, 2, 3].map((i) => (
-                <div key={i} className="h-48 w-full animate-pulse rounded-2xl bg-muted/80" />
+            </aside>
+            <main className="flex-1 space-y-8 min-w-0">
+              {[1, 2, 3, 4].map((i) => (
+                <Skeleton key={i} className="h-40 w-full rounded-xl" />
               ))}
-            </div>
+            </main>
           </div>
         </div>
       </AppShell>
@@ -1273,37 +1281,61 @@ export default function ProjectInputsPage() {
       <AppShell>
         <div className="space-y-6">
           <ProjectHeader />
-          <PageHeader title="SWMP Inputs" />
-          <Notice type="error" title="Error" message={pageError} />
+          <div className="max-w-6xl mx-auto px-4">
+            <InputsPageHeader title="Inputs" saveState="idle" />
+          </div>
+          <Notice type="error" title="Error" message={pageError} className="max-w-6xl mx-auto px-4" />
         </div>
       </AppShell>
     );
   }
 
+  const projectName = project?.name ?? projectContext?.project?.name ?? "Project";
+  const facilitySummary =
+    primaryWasteContractorPartnerId && catalogPartners.length > 0
+      ? catalogPartners.find((p) => p.id === primaryWasteContractorPartnerId)?.name ?? null
+      : null;
+
   return (
     <AppShell>
       <div className="space-y-6">
         <ProjectHeader />
-        <PageHeader
-          title="SWMP Inputs"
-          subtitle={
-            <ProjectStatusPills status={projectStatus} showLabels={true} className="shrink-0" />
-          }
-        />
+        <div className="max-w-6xl mx-auto px-4">
+          <InputsPageHeader
+            breadcrumb={[
+              { label: "Projects", href: "/projects" },
+              { label: projectName, href: projectId ? `/projects/${projectId}` : undefined },
+              { label: "Inputs" },
+            ]}
+            title="Inputs"
+            subtitle={<ProjectStatusPills status={projectStatus} showLabels={true} className="shrink-0" />}
+            saveState={saveState}
+            lastSavedAt={lastSavedAt}
+          />
+          <ProjectSummaryStrip
+            region={region || null}
+            projectType={effectiveProjectType || null}
+            mainContractor={mainContractor || null}
+            facilitySummary={facilitySummary}
+            totalEstimatedWasteTonnes={diversionSummary.totalTonnes > 0 ? diversionSummary.totalTonnes : null}
+            className="mt-4"
+          />
+        </div>
 
         <div className="flex gap-8">
           <aside className="hidden lg:block w-52 shrink-0">
             <InputsSidebarNav />
           </aside>
           <main className="min-w-0 flex-1">
-            <div className="max-w-6xl mx-auto space-y-10">
-              {/* Project Overview */}
+            <div className="max-w-6xl mx-auto space-y-8">
+              {/* Section A — Project Overview / Strategy */}
               <InputsSectionCard
                 id="project-overview"
                 icon={<LayoutDashboard className="size-5" />}
                 title="Project Overview"
                 description="Complete required fields to enable Save inputs and Generate SWMP."
                 accent="emerald"
+                variant="grouped"
                 completion={{
                   completed: [
                     siteAddress.trim(),
@@ -1796,13 +1828,14 @@ export default function ProjectInputsPage() {
               </InputsSectionCard>
 
               <form onSubmit={handleSaveInputs} className="space-y-10">
-              {/* Primary Waste Contractor */}
+              {/* Section B — Primary Waste Contractor (Strategy) */}
               <InputsSectionCard
                 id="primary-waste-contractor"
                 icon={<Users className="size-5" />}
                 title="Primary Waste Contractor"
                 description="Select the main waste contractor and bin setup."
                 accent="blue"
+                variant="grouped"
               >
                 {selectedWasteStreams.length > 0 && (
                   <p className="text-sm text-muted-foreground mb-4">
@@ -1865,6 +1898,7 @@ export default function ProjectInputsPage() {
                 title="Site & Facilities"
                 description="Site constraints. Facilities are selected per stream in Waste Streams."
                 accent="amber"
+                variant="grouped"
               >
                 <FieldGroup
                   label="Site constraints"
@@ -1885,13 +1919,14 @@ export default function ProjectInputsPage() {
                 </FieldGroup>
               </InputsSectionCard>
 
-              {/* Waste Streams */}
+              {/* Section C — Waste Streams */}
               <InputsSectionCard
                 id="waste-streams"
                 icon={<Recycle className="size-5" />}
                 title="Waste Streams"
                 description="Configure waste streams, diversion, and stream plans."
-                accent="purple"
+                accent="green"
+                variant="grouped"
                 completion={{
                   completed: selectedWasteStreams.length,
                   total: Math.max(selectedWasteStreams.length, 1),
@@ -2359,62 +2394,32 @@ export default function ProjectInputsPage() {
                       summaryDestination.length > 50 ? `${summaryDestination.slice(0, 47)}…` : summaryDestination;
 
                     return (
-                      <div
+                      <StreamRow
                         key={stream}
-                        className="border rounded-lg bg-card p-3 space-y-3"
+                        title={stream}
+                        badges={
+                          <>
+                            <Badge variant="secondary" className="text-xs font-normal">
+                              {summaryOutcomes}
+                            </Badge>
+                            <span className="text-xs text-muted-foreground truncate max-w-[180px]">
+                              {titlePartnerName}
+                            </span>
+                          </>
+                        }
+                        totalTonnes={summaryQtyUnit || "—"}
+                        expanded={expanded}
+                        onToggle={() =>
+                          setExpandedStreamPlans((prev) => ({
+                            ...prev,
+                            [stream]: !(prev[stream] ?? false),
+                          }))
+                        }
+                        onRemove={() =>
+                          setSelectedWasteStreams((prev) => prev.filter((x) => x !== stream))
+                        }
                       >
-                        <div
-                          role="button"
-                          tabIndex={0}
-                          onClick={() =>
-                            setExpandedStreamPlans((prev) => ({
-                              ...prev,
-                              [stream]: !(prev[stream] ?? false),
-                            }))
-                          }
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" || e.key === " ") {
-                              e.preventDefault();
-                              setExpandedStreamPlans((prev) => ({
-                                ...prev,
-                                [stream]: !(prev[stream] ?? false),
-                              }));
-                            }
-                          }}
-                          className="w-full text-left flex items-center justify-between gap-2 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-md"
-                        >
-                          <div className="flex-1 min-w-0">
-                            <div className="font-semibold">
-                              {stream} — {summaryQtyUnit || "—"} — {summaryOutcomes} — {titlePartnerName}
-                            </div>
-                            <div className="text-xs text-muted-foreground">
-                              {expanded ? "Click to collapse" : "Click to expand"}
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-2 shrink-0">
-                            {expanded ? (
-                              <ChevronUpIcon className="size-4" />
-                            ) : (
-                              <ChevronDownIcon className="size-4" />
-                            )}
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setSelectedWasteStreams((prev) =>
-                                  prev.filter((x) => x !== stream)
-                                );
-                              }}
-                            >
-                              Remove
-                            </Button>
-                          </div>
-                        </div>
-
-                        {expanded && (
-                          <div className="space-y-4 pt-3 border-t">
+                        <div className="space-y-4">
                             <div className="grid gap-2">
                               <Label>Handling</Label>
                               <p className="text-xs text-muted-foreground">
@@ -2968,8 +2973,7 @@ export default function ProjectInputsPage() {
                               />
                             </div>
                           </div>
-                        )}
-                      </div>
+                      </StreamRow>
                     );
                   })}
                 </div>
@@ -3013,13 +3017,14 @@ export default function ProjectInputsPage() {
             </div>
               </InputsSectionCard>
 
-              {/* Resource Inputs */}
+              {/* Section D — Resource Inputs */}
               <InputsSectionCard
                 id="resource-inputs"
                 icon={<FileInput className="size-5" />}
                 title="Resource Inputs"
                 description="Sorting level, target diversion, monitoring, and site controls."
                 accent="zinc"
+                variant="grouped"
               >
                 <FieldGroup gridClassName="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                   <div className="space-y-2">
@@ -3241,7 +3246,8 @@ export default function ProjectInputsPage() {
                 icon={<ClipboardList className="size-5" />}
                 title="Compliance & Notes"
                 description="Responsibilities, notes, save inputs, and generate SWMP."
-                accent="zinc"
+                accent="amber"
+                variant="grouped"
               >
                 <Accordion type="single" collapsible defaultValue="" className="w-full max-w-full overflow-hidden">
               <AccordionItem value="responsibilities" className="border rounded-lg px-0 mb-2 overflow-hidden">

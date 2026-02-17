@@ -5,36 +5,26 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
 import { AppShell } from "@/components/app-shell";
-import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/ui/section-card";
-import { Notice } from "@/components/notice";
+import { ProjectsDashboardNav } from "@/components/projects-dashboard-nav";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectLabel,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { PROJECT_TYPE_GROUPS, PROJECT_TYPE_OPTIONS } from "@/lib/projectTypeOptions";
+import { PROJECT_TYPE_GROUPS } from "@/lib/projectTypeOptions";
 import { fetchProjectStatusDataForProjects } from "@/lib/projectStatus";
 import type { ProjectStatusData } from "@/lib/projectStatus";
 import { ProjectCard } from "@/components/project-card";
-import { QuickCreateProjectModal } from "@/components/quick-create-project-modal";
+import { DeleteProjectDialog } from "@/components/projects/DeleteProjectDialog";
+import { NewProjectSheet } from "@/components/new-project-sheet";
 import type { QuickCreateProjectFormState } from "@/components/quick-create-project-modal";
 import { Skeleton } from "@/components/ui/skeleton";
-import { AddressPicker, type AddressPickerValue } from "@/components/address-picker";
 import {
   FolderOpen,
   Recycle,
   Building2,
   TrendingUp,
+  Search,
+  Plus,
 } from "lucide-react";
 import type { DashboardMetricsResponse } from "@/app/api/dashboard/metrics/route";
 import type { PlanningChecklist } from "@/lib/planning/planningChecklist";
@@ -72,7 +62,15 @@ const REGION_OPTIONS = [
   "Other (NZ)",
 ] as const;
 
-function MetricCard({
+function formatTonnes(n: number): string {
+  if (!Number.isFinite(n) || n < 0) return "—";
+  if (n >= 100) return n.toFixed(1);
+  if (n >= 1) return n.toFixed(2);
+  return n.toFixed(3);
+}
+
+/** Stat card for dashboard KPIs */
+function StatCard({
   icon,
   label,
   value,
@@ -84,31 +82,24 @@ function MetricCard({
   loading: boolean;
 }) {
   return (
-    <div className="rounded-xl border border-border bg-card/50 shadow-sm p-4 min-h-[92px] flex flex-col justify-center">
-      <div className="flex items-start gap-2">
-        <div className="mt-0.5 h-4 w-4 shrink-0 flex items-center justify-center text-muted-foreground [&>svg]:size-4">
+    <div className="rounded-xl border border-border/50 bg-card shadow-sm p-5 min-h-[100px] flex flex-col justify-center">
+      <div className="flex items-start gap-3">
+        <div className="rounded-lg bg-muted/50 p-2 text-muted-foreground [&>svg]:size-5">
           {icon}
         </div>
         <div className="min-w-0 flex-1 space-y-1">
-          <p className="text-xs font-medium leading-snug text-muted-foreground line-clamp-2 break-words tracking-normal">
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
             {label}
           </p>
           {loading ? (
-            <div className="h-8 w-12 animate-pulse rounded bg-muted/80" aria-hidden />
+            <Skeleton className="h-8 w-16" />
           ) : (
-            <p className="text-2xl font-semibold tabular-nums">{value ?? "—"}</p>
+            <p className="text-2xl font-semibold tabular-nums tracking-tight">{value ?? "—"}</p>
           )}
         </div>
       </div>
     </div>
   );
-}
-
-function formatTonnes(n: number): string {
-  if (!Number.isFinite(n) || n < 0) return "—";
-  if (n >= 100) return n.toFixed(1);
-  if (n >= 1) return n.toFixed(2);
-  return n.toFixed(3);
 }
 
 export default function ProjectsPage() {
@@ -128,47 +119,12 @@ export default function ProjectsPage() {
   const [metricsLoading, setMetricsLoading] = useState(false);
   const [metricsError, setMetricsError] = useState<string | null>(null);
 
-  // Create form state
-  const [name, setName] = useState("");
-  const [address, setAddress] = useState("");
-  const [siteAddressValidated, setSiteAddressValidated] = useState<AddressPickerValue | null>(null);
-  const [region, setRegion] = useState<(typeof REGION_OPTIONS)[number] | "">("");
-  const [projectType, setProjectType] = useState("");
-  const [projectTypeOther, setProjectTypeOther] = useState("");
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
-  const [clientName, setClientName] = useState("");
-  const [mainContractor, setMainContractor] = useState("");
-  const [swmpOwner, setSwmpOwner] = useState("");
-
   const [createLoading, setCreateLoading] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
-  const [createMessage, setCreateMessage] = useState<string | null>(null);
-  const [validationErrors, setValidationErrors] = useState<string[]>([]);
-  const [quickCreateOpen, setQuickCreateOpen] = useState(false);
-  const [quickCreateError, setQuickCreateError] = useState<string | null>(null);
-  const [quickCreateMessage, setQuickCreateMessage] = useState<string | null>(null);
-
-  const requiredFields = useMemo(() => {
-    const effective = projectType === "Other" ? projectTypeOther.trim() : projectType.trim();
-    const errors: string[] = [];
-    if (!siteAddressValidated?.place_id || siteAddressValidated.lat == null || siteAddressValidated.lng == null) errors.push("Site address (choose from suggestions)");
-    if (!region) errors.push("Region");
-    if (!effective) errors.push("Project type");
-    if (!startDate) errors.push("Start date");
-    if (!clientName.trim()) errors.push("Client name");
-    if (!mainContractor.trim()) errors.push("Main contractor");
-    if (!swmpOwner.trim()) errors.push("SWMP owner");
-    return errors;
-  }, [siteAddressValidated, region, projectType, projectTypeOther, startDate, clientName, mainContractor, swmpOwner]);
-
-  const canCreate = useMemo(() => {
-    return (
-      !!user?.id &&
-      name.trim().length >= 2 &&
-      requiredFields.length === 0
-    );
-  }, [user?.id, name, requiredFields.length]);
+  const [newProjectSheetOpen, setNewProjectSheetOpen] = useState(false);
+  const [sheetError, setSheetError] = useState<string | null>(null);
+  const [sheetMessage, setSheetMessage] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [deleteDialogProject, setDeleteDialogProject] = useState<{ id: string; name: string } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -351,106 +307,11 @@ export default function ProjectsPage() {
     return () => window.removeEventListener("focus", onFocus);
   }, [user?.id]);
 
-  async function handleCreateProject(e: React.FormEvent) {
-    e.preventDefault();
-    setCreateError(null);
-    setCreateMessage(null);
-    setValidationErrors([]);
-
-    // Validate required fields
-    if (requiredFields.length > 0) {
-      setValidationErrors(requiredFields);
-      setCreateError(`Please fill in all required fields: ${requiredFields.join(", ")}`);
-      return;
-    }
-
-    if (!user?.id || name.trim().length < 2) {
-      setCreateError("Please enter a project name (at least 2 characters).");
-      return;
-    }
-
-    setCreateLoading(true);
-
-    try {
-      const validated = siteAddressValidated;
-      if (!validated?.place_id || validated.lat == null || validated.lng == null) {
-        setCreateError("Please select a site address from the suggestions.");
-        setCreateLoading(false);
-        return;
-      }
-      const validateRes = await fetch("/api/validate-address", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ place_id: validated.place_id }),
-      });
-      if (!validateRes.ok) {
-        const err = await validateRes.json();
-        setCreateError(err?.error ?? "Address validation failed.");
-        setCreateLoading(false);
-        return;
-      }
-      const serverAddress = (await validateRes.json()) as { formatted_address: string; place_id: string; lat: number; lng: number };
-      const ptSave = projectType === "Other" ? (projectTypeOther.trim() || "Other") : projectType;
-      const insertPayload = {
-        user_id: user!.id,
-        name: name.trim(),
-        address: serverAddress.formatted_address,
-        site_address: serverAddress.formatted_address,
-        site_place_id: serverAddress.place_id,
-        site_lat: serverAddress.lat,
-        site_lng: serverAddress.lng,
-        region: region,
-        project_type: ptSave,
-        start_date: startDate,
-        end_date: endDate.trim() || null,
-        client_name: clientName.trim(),
-        main_contractor: mainContractor.trim(),
-        swmp_owner: swmpOwner.trim(),
-      };
-
-      const { data, error } = await supabase
-        .from("projects")
-        .insert(insertPayload)
-        .select("id")
-        .single();
-
-      if (error) {
-        setCreateError(error.message);
-        return;
-      }
-
-      setCreateMessage("Project created.");
-      // Reset form
-      setName("");
-      setAddress("");
-      setSiteAddressValidated(null);
-      setRegion("");
-      setProjectType("");
-      setProjectTypeOther("");
-      setStartDate("");
-      setEndDate("");
-      setClientName("");
-      setMainContractor("");
-      setSwmpOwner("");
-
-      // Refresh list
-      await fetchProjects();
-
-      // Navigate straight to inputs
-      if (data?.id) {
-        router.push(`/projects/${data.id}/inputs`);
-      }
-    } finally {
-      setCreateLoading(false);
-    }
-  }
-
-  async function handleQuickCreateSubmit(state: QuickCreateProjectFormState) {
-    setQuickCreateError(null);
-    setQuickCreateMessage(null);
+  async function handleNewProjectSubmit(state: QuickCreateProjectFormState) {
+    setSheetError(null);
+    setSheetMessage(null);
     if (!user?.id || state.name.trim().length < 2) {
-      setQuickCreateError("Please enter a project name (at least 2 characters).");
+      setSheetError("Please enter a project name (at least 2 characters).");
       return;
     }
     const missing: string[] = [];
@@ -463,7 +324,7 @@ export default function ProjectsPage() {
     if (!state.mainContractor.trim()) missing.push("Main contractor");
     if (!state.swmpOwner.trim()) missing.push("SWMP owner");
     if (missing.length) {
-      setQuickCreateError(`Please fill in: ${missing.join(", ")}`);
+      setSheetError(`Please fill in: ${missing.join(", ")}`);
       return;
     }
     const validateRes = await fetch("/api/validate-address", {
@@ -474,57 +335,87 @@ export default function ProjectsPage() {
     });
     if (!validateRes.ok) {
       const err = await validateRes.json();
-      setQuickCreateError(err?.error ?? "Address validation failed.");
+      setSheetError(err?.error ?? "Address validation failed.");
       return;
     }
     const serverAddress = (await validateRes.json()) as { formatted_address: string; place_id: string; lat: number; lng: number };
     const ptSave = state.projectType === "Other" ? (state.projectTypeOther.trim() || "Other") : state.projectType;
-    const { data, error } = await supabase
-      .from("projects")
-      .insert({
-        user_id: user.id,
-        name: state.name.trim(),
-        address: serverAddress.formatted_address,
-        site_address: serverAddress.formatted_address,
-        site_place_id: serverAddress.place_id,
-        site_lat: serverAddress.lat,
-        site_lng: serverAddress.lng,
-        region: state.region,
-        project_type: ptSave,
-        start_date: state.startDate,
-        end_date: null,
-        client_name: state.clientName.trim(),
-        main_contractor: state.mainContractor.trim(),
-        swmp_owner: state.swmpOwner.trim(),
-      })
-      .select("id")
-      .single();
-    if (error) {
-      setQuickCreateError(error.message);
-      return;
+    setCreateLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from("projects")
+        .insert({
+          user_id: user.id,
+          name: state.name.trim(),
+          address: serverAddress.formatted_address,
+          site_address: serverAddress.formatted_address,
+          site_place_id: serverAddress.place_id,
+          site_lat: serverAddress.lat,
+          site_lng: serverAddress.lng,
+          region: state.region,
+          project_type: ptSave,
+          start_date: state.startDate,
+          end_date: null,
+          client_name: state.clientName.trim(),
+          main_contractor: state.mainContractor.trim(),
+          swmp_owner: state.swmpOwner.trim(),
+        })
+        .select("id")
+        .single();
+      if (error) {
+        setSheetError(error.message);
+        return;
+      }
+      setSheetMessage("Project created.");
+      await fetchProjects();
+      setNewProjectSheetOpen(false);
+      if (data?.id) router.push(`/projects/${data.id}/inputs`);
+    } finally {
+      setCreateLoading(false);
     }
-    setQuickCreateMessage("Project created.");
-    await fetchProjects();
-    setQuickCreateOpen(false);
-    if (data?.id) router.push(`/projects/${data.id}/inputs`);
   }
+
+  const filteredProjects = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return projects;
+    return projects.filter(
+      (p) =>
+        (p.name ?? "").toLowerCase().includes(q) ||
+        (p.address ?? "").toLowerCase().includes(q) ||
+        (p.region ?? "").toLowerCase().includes(q) ||
+        (p.project_type ?? "").toLowerCase().includes(q)
+    );
+  }, [projects, searchQuery]);
 
   if (loading) {
     return (
-      <AppShell>
-        <div className="space-y-6 max-w-4xl mx-auto">
-          <div className="flex justify-between items-center">
-            <Skeleton className="h-9 w-48" />
-            <Skeleton className="h-9 w-32" />
+      <AppShell
+        topNav={
+          <div className="flex w-full items-center justify-between">
+            <Skeleton className="h-6 w-24" />
+            <div className="flex gap-2">
+              <Skeleton className="h-9 w-28" />
+              <Skeleton className="h-9 w-9" />
+            </div>
           </div>
+        }
+      >
+        <div className="space-y-6">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {[1, 2, 3, 4].map((i) => (
-              <Skeleton key={i} className="h-20 rounded-xl" />
+              <Skeleton key={i} className="h-[100px] rounded-xl" />
             ))}
           </div>
-          <div className="space-y-4">
-            <Skeleton className="h-64 w-full rounded-xl" />
-            <Skeleton className="h-32 w-full rounded-xl" />
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            <Skeleton className="h-48 rounded-xl lg:col-span-4" />
+            <div className="space-y-4 lg:col-span-8">
+              <Skeleton className="h-12 w-full rounded-lg" />
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {[1, 2, 3, 4, 5, 6].map((i) => (
+                  <Skeleton key={i} className="h-52 rounded-xl" />
+                ))}
+              </div>
+            </div>
           </div>
         </div>
       </AppShell>
@@ -532,38 +423,18 @@ export default function ProjectsPage() {
   }
 
   return (
-    <AppShell>
-      <div className="space-y-6">
-        <PageHeader
+    <AppShell
+      topNav={
+        <ProjectsDashboardNav
           title="Projects"
-          subtitle={
-            <span>
-              Logged in as{" "}
-              <Badge variant="outline" className="ml-1">
-                {user?.email ?? "Unknown"}
-              </Badge>
-            </span>
-          }
-          actions={
-            <div className="flex items-center gap-2">
-              <Button variant="primary" size="default" onClick={() => setQuickCreateOpen(true)}>
-                Quick Create Project
-              </Button>
-              {isSuperAdmin && (
-                <Button variant="outline" size="default" onClick={() => router.push("/admin")} aria-label="Management (super admin)">
-                  Management
-                </Button>
-              )}
-              <Button variant="outline" size="default" onClick={() => router.push("/settings/brand")}>
-                Brand Settings
-              </Button>
-              <Button variant="outline" size="default" onClick={handleSignOut}>
-                Sign out
-              </Button>
-            </div>
-          }
+          userEmail={user?.email ?? null}
+          isSuperAdmin={isSuperAdmin}
+          onNewProject={() => setNewProjectSheetOpen(true)}
+          onSignOut={handleSignOut}
         />
-
+      }
+    >
+      <div className="space-y-6">
         {pageError ? (
           <Alert variant="destructive">
             <AlertTitle>Error</AlertTitle>
@@ -571,298 +442,190 @@ export default function ProjectsPage() {
           </Alert>
         ) : null}
 
-        <div className="grid gap-6 lg:grid-cols-5">
-          <div className="lg:col-span-2">
-            <SectionCard
-              title="Create a New Project"
-              description="Create a project, then go straight to inputs."
-            >
-              <form onSubmit={handleCreateProject} className="grid gap-4">
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="grid gap-2">
-                    <Label>Project name *</Label>
-                    <Input
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                      placeholder="e.g., Hobson St Fit-out"
-                      disabled={createLoading}
-                    />
-                  </div>
-
-                  <div className="grid gap-2">
-                    <Label>Site address *</Label>
-                    <AddressPicker
-                      value={address}
-                      onChange={(v) => {
-                        setSiteAddressValidated(v);
-                        setAddress(v?.formatted_address ?? "");
-                      }}
-                      onInput={(v) => {
-                        setAddress(v);
-                        if (!v.trim()) setSiteAddressValidated(null);
-                      }}
-                      placeholder="Search address…"
-                      disabled={createLoading}
-                    />
-                    <p className="text-xs text-muted-foreground">Choose from suggestions to validate the address.</p>
-                  </div>
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          {/* Left: minimal Create project card */}
+          <div className="lg:col-span-4">
+            <div className="rounded-xl border border-border/50 bg-card shadow-sm overflow-hidden p-6">
+              <div className="flex flex-col items-start gap-4">
+                <div className="rounded-lg bg-primary/10 p-3 text-primary">
+                  <Plus className="size-6" />
                 </div>
-
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="grid gap-2">
-                    <Label>Region *</Label>
-                    <Select
-                      value={region}
-                      onValueChange={(value) => setRegion(value as any)}
-                      disabled={createLoading}
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Select…" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {REGION_OPTIONS.map((r) => (
-                          <SelectItem key={r} value={r}>
-                            {r}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="grid gap-2">
-                    <Label>Project type *</Label>
-                    <Select
-                      value={PROJECT_TYPE_OPTIONS.includes(projectType) ? projectType : projectType ? "Other" : undefined}
-                      onValueChange={(value) => {
-                        setProjectType(value ?? "");
-                        if (value !== "Other") setProjectTypeOther("");
-                      }}
-                      disabled={createLoading}
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Select project type" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {PROJECT_TYPE_GROUPS.map((group) => (
-                          <SelectGroup key={group.label}>
-                            <SelectLabel className="font-semibold">{group.label}</SelectLabel>
-                            {group.options.map((opt) => (
-                              <SelectItem key={opt} value={opt}>
-                                {opt}
-                              </SelectItem>
-                            ))}
-                          </SelectGroup>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    {projectType === "Other" && (
-                      <Input
-                        value={projectTypeOther}
-                        onChange={(e) => setProjectTypeOther(e.target.value)}
-                        placeholder="Describe project type"
-                        disabled={createLoading}
-                        className="mt-2"
-                      />
-                    )}
-                  </div>
+                <div className="space-y-1">
+                  <h2 className="text-lg font-semibold text-foreground">Create a project</h2>
+                  <p className="text-sm text-muted-foreground">
+                    Add a new project with site, region, and dates. You can edit details on the inputs page.
+                  </p>
                 </div>
-
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="grid gap-2">
-                    <Label>Start date *</Label>
-                    <Input
-                      type="date"
-                      value={startDate}
-                      onChange={(e) => setStartDate(e.target.value)}
-                      disabled={createLoading}
-                    />
-                  </div>
-
-                  <div className="grid gap-2">
-                    <Label>End date</Label>
-                    <Input
-                      type="date"
-                      value={endDate}
-                      onChange={(e) => setEndDate(e.target.value)}
-                      disabled={createLoading}
-                    />
-                  </div>
-                </div>
-
-                <div className="grid gap-2">
-                  <Label>Client name *</Label>
-                  <Input
-                    value={clientName}
-                    onChange={(e) => setClientName(e.target.value)}
-                    placeholder="e.g. Auckland Council / Precinct Properties / Client Ltd"
-                    disabled={createLoading}
-                  />
-                </div>
-
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="grid gap-2">
-                    <Label>Main contractor *</Label>
-                    <Input
-                      value={mainContractor}
-                      onChange={(e) => setMainContractor(e.target.value)}
-                      placeholder="Company name"
-                      disabled={createLoading}
-                    />
-                  </div>
-
-                  <div className="grid gap-2">
-                    <Label>SWMP owner *</Label>
-                    <Input
-                      value={swmpOwner}
-                      onChange={(e) => setSwmpOwner(e.target.value)}
-                      placeholder="Name / role"
-                      disabled={createLoading}
-                    />
-                  </div>
-                </div>
-
-                {validationErrors.length > 0 ? (
-                  <Notice
-                    type="error"
-                    title="Missing required fields"
-                    message={`Please fill in: ${validationErrors.join(", ")}`}
-                  />
-                ) : null}
-
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <Button
-                    type="submit"
-                    variant="primary"
-                    size="default"
-                    disabled={createLoading || !canCreate}
-                  >
-                    {createLoading ? "Creating…" : "Create Project"}
-                  </Button>
-                  <div className="text-xs text-muted-foreground">
-                    Required: project name, site address, region, project type, start date, client name, main contractor, SWMP owner
-                  </div>
-                </div>
-
-                {createError ? (
-                  <Notice
-                    type="error"
-                    title="Couldn't create project"
-                    message={createError}
-                  />
-                ) : null}
-
-                {createMessage ? (
-                  <Notice
-                    type="success"
-                    title="Success"
-                    message={createMessage}
-                  />
-                ) : null}
-              </form>
-            </SectionCard>
+                <Button
+                  variant="primary"
+                  size="default"
+                  className="w-full sm:w-auto"
+                  onClick={() => setNewProjectSheetOpen(true)}
+                >
+                  <Plus className="size-4 mr-2" />
+                  New project
+                </Button>
+              </div>
+            </div>
           </div>
 
-          <div className="lg:col-span-3 space-y-6">
-            {/* Project Intelligence metrics strip */}
-            <div className="space-y-3">
-              {metricsError ? (
-                <div className="flex items-center justify-between gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">
-                  <span className="text-destructive">{metricsError}</span>
-                  <Button variant="outline" size="sm" onClick={() => fetchMetrics()} disabled={metricsLoading}>
-                    Retry
-                  </Button>
-                </div>
-              ) : null}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <MetricCard
-                  icon={<FolderOpen className="size-5 text-muted-foreground" />}
-                  label="Active Projects"
-                  value={metrics?.activeProjects}
-                  loading={metricsLoading}
-                />
-                <MetricCard
-                  icon={<Recycle className="size-5 text-muted-foreground" />}
-                  label="Total Waste Streams"
-                  value={metrics?.totalWasteStreamsConfigured}
-                  loading={metricsLoading}
-                />
-                <MetricCard
-                  icon={<Building2 className="size-5 text-muted-foreground" />}
-                  label="Facilities utilised"
-                  value={metrics?.facilitiesLinked}
-                  loading={metricsLoading}
-                />
-                <MetricCard
-                  icon={<TrendingUp className="size-5 text-muted-foreground" />}
-                  label="Total estimated waste (tonnes)"
-                  value={metrics?.totalEstimatedWasteTonnes != null ? formatTonnes(metrics.totalEstimatedWasteTonnes) : undefined}
-                  loading={metricsLoading}
-                />
+          {/* Right: KPIs + Your Projects */}
+          <div className="lg:col-span-8 space-y-6">
+            {metricsError ? (
+              <div className="flex items-center justify-between gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm">
+                <span className="text-destructive">{metricsError}</span>
+                <Button variant="outline" size="sm" onClick={() => fetchMetrics()} disabled={metricsLoading}>
+                  Retry
+                </Button>
               </div>
+            ) : null}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <StatCard
+                icon={<FolderOpen className="size-5" />}
+                label="Active projects"
+                value={metrics?.activeProjects}
+                loading={metricsLoading}
+              />
+              <StatCard
+                icon={<Recycle className="size-5" />}
+                label="Total waste streams"
+                value={metrics?.totalWasteStreamsConfigured}
+                loading={metricsLoading}
+              />
+              <StatCard
+                icon={<Building2 className="size-5" />}
+                label="Facilities utilised"
+                value={metrics?.facilitiesLinked}
+                loading={metricsLoading}
+              />
+              <StatCard
+                icon={<TrendingUp className="size-5" />}
+                label="Estimated waste (t)"
+                value={metrics?.totalEstimatedWasteTonnes != null ? formatTonnes(metrics.totalEstimatedWasteTonnes) : undefined}
+                loading={metricsLoading}
+              />
             </div>
 
             <SectionCard
               title="Your Projects"
               description="Open a project to edit inputs and generate its SWMP."
               actions={
-                <Button variant="outline" size="default" onClick={() => { fetchProjects(); fetchMetrics(); }} disabled={listLoading}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    fetchProjects();
+                    fetchMetrics();
+                  }}
+                  disabled={listLoading}
+                >
                   {listLoading ? "Refreshing…" : "Refresh"}
                 </Button>
               }
             >
-              {listLoading ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {[1, 2, 3, 4, 5].map((i) => (
-                    <Skeleton key={i} className="h-44 rounded-xl" />
-                  ))}
-                </div>
-              ) : projects.length === 0 ? (
-                <Alert>
-                  <AlertTitle>No projects yet</AlertTitle>
-                  <AlertDescription>Create your first project using Quick Create or the form.</AlertDescription>
-                </Alert>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {projects.map((p) => (
-                    <ProjectCard
-                      key={p.id}
-                      id={p.id}
-                      name={p.name}
-                      address={p.address}
-                      region={p.region}
-                      project_type={p.project_type}
-                      created_at={p.created_at}
-                      status={statusByProjectId.get(p.id) ?? {
-                        inputs_complete: false,
-                        forecasting_started: false,
-                        outputs_generated: false,
-                      }}
-                      onOpen={() => router.push(`/projects/${p.id}/inputs`)}
-                      checklist={checklistByProjectId.get(p.id) ?? null}
+              <div className="space-y-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="relative flex-1 max-w-sm">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Search projects…"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="pl-9 h-9"
                     />
-                  ))}
+                  </div>
+                  {searchQuery.trim() ? (
+                    <span className="text-xs text-muted-foreground">
+                      {filteredProjects.length} of {projects.length} projects
+                    </span>
+                  ) : null}
                 </div>
-              )}
+
+                {listLoading ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {[1, 2, 3, 4, 5, 6].map((i) => (
+                      <Skeleton key={i} className="h-52 rounded-xl" />
+                    ))}
+                  </div>
+                ) : filteredProjects.length === 0 ? (
+                  <div className="rounded-xl border border-border/50 bg-muted/30 py-12 px-6 text-center">
+                    <p className="font-medium text-foreground">
+                      {projects.length === 0 ? "No projects yet" : "No projects match your search"}
+                    </p>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      {projects.length === 0
+                        ? "Create your first project using the button above or New project in the header."
+                        : "Try a different search term."}
+                    </p>
+                    {projects.length === 0 && (
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        className="mt-4"
+                        onClick={() => setNewProjectSheetOpen(true)}
+                      >
+                        New project
+                      </Button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {filteredProjects.map((p) => (
+                      <ProjectCard
+                        key={p.id}
+                        id={p.id}
+                        name={p.name}
+                        address={p.address}
+                        region={p.region}
+                        project_type={p.project_type}
+                        created_at={p.created_at}
+                        status={
+                          statusByProjectId.get(p.id) ?? {
+                            inputs_complete: false,
+                            forecasting_started: false,
+                            outputs_generated: false,
+                          }
+                        }
+                        onOpen={() => router.push(`/projects/${p.id}/inputs`)}
+                        checklist={checklistByProjectId.get(p.id) ?? null}
+                        onDeleteRequest={(proj) => setDeleteDialogProject(proj)}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
             </SectionCard>
           </div>
         </div>
 
-        <QuickCreateProjectModal
-          open={quickCreateOpen}
+        <NewProjectSheet
+          open={newProjectSheetOpen}
           onOpenChange={(open) => {
-            setQuickCreateOpen(open);
+            setNewProjectSheetOpen(open);
             if (!open) {
-              setQuickCreateError(null);
-              setQuickCreateMessage(null);
+              setSheetError(null);
+              setSheetMessage(null);
             }
           }}
-          onSubmit={handleQuickCreateSubmit}
+          onSubmit={handleNewProjectSubmit}
           loading={createLoading}
-          error={quickCreateError}
-          successMessage={quickCreateMessage}
-          projectTypeOptions={[]}
+          error={sheetError}
+          successMessage={sheetMessage}
           projectTypeGroups={PROJECT_TYPE_GROUPS}
         />
+
+        {deleteDialogProject && (
+          <DeleteProjectDialog
+            open={!!deleteDialogProject}
+            onOpenChange={(open) => !open && setDeleteDialogProject(null)}
+            projectId={deleteDialogProject.id}
+            projectName={deleteDialogProject.name}
+            onDeleted={() => {
+              fetchProjects();
+              fetchMetrics();
+            }}
+          />
+        )}
       </div>
     </AppShell>
   );

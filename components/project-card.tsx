@@ -7,9 +7,16 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ProjectStatusPills } from "@/components/project-status-pills";
 import { ProjectHealthBadge } from "@/components/project-status-pill";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import type { ProjectStatusData } from "@/lib/projectStatus";
 import type { PlanningChecklist } from "@/lib/planning/planningChecklist";
-import { MapPin, Calendar } from "lucide-react";
+import { MapPin, MoreVertical, FolderOpen, Trash2 } from "lucide-react";
 
 export interface ProjectCardProps {
   id: string;
@@ -22,6 +29,8 @@ export interface ProjectCardProps {
   onOpen: () => void;
   /** When provided, shows planning readiness % and next best action. */
   checklist?: PlanningChecklist | null;
+  /** When provided, shows "Delete project" in dropdown and calls this with { id, name }. */
+  onDeleteRequest?: (project: { id: string; name: string }) => void;
   className?: string;
 }
 
@@ -35,6 +44,7 @@ export function ProjectCard({
   status,
   onOpen,
   checklist,
+  onDeleteRequest,
   className,
 }: ProjectCardProps) {
   const readiness = checklist?.readiness_score ?? null;
@@ -42,61 +52,107 @@ export function ProjectCard({
 
   return (
     <motion.article
-      initial={{ opacity: 0, y: 8 }}
+      initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2 }}
-      role="button"
-      tabIndex={0}
-      onClick={onOpen}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onOpen();
-        }
-      }}
       className={cn(
-        "rounded-xl border border-border bg-card shadow-sm overflow-hidden",
-        "hover:border-primary/30 hover:shadow-md transition-all duration-200",
-        "focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-        "cursor-pointer text-left",
+        "rounded-xl border border-border/50 bg-card shadow-sm overflow-hidden text-left",
+        "hover:border-border hover:shadow-sm transition-all duration-200",
+        "flex flex-col",
         className
       )}
-      aria-label={`Open project ${name}`}
     >
-      <div className="p-4 space-y-3">
+      <div className="p-5 space-y-4 flex-1 flex flex-col min-w-0">
         <div className="flex items-start justify-between gap-2">
-          <h3 className="font-semibold text-base truncate flex-1">{name}</h3>
-          <ProjectHealthBadge status={status} showScore={true} />
+          <h3 className="font-semibold text-base truncate flex-1 leading-tight">{name}</h3>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                className="shrink-0 rounded-md"
+                onClick={(e) => e.stopPropagation()}
+                aria-label="More actions"
+              >
+                <MoreVertical className="size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+              <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onOpen(); }}>
+                <FolderOpen className="size-4 mr-2" />
+                Open project
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <Link href={`/projects/${id}/inputs`} onClick={(e) => e.stopPropagation()}>
+                  Go to inputs
+                </Link>
+              </DropdownMenuItem>
+              {onDeleteRequest && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDeleteRequest({ id, name });
+                    }}
+                    className="text-destructive focus:text-destructive"
+                  >
+                    <Trash2 className="size-4 mr-2" />
+                    Delete project
+                  </DropdownMenuItem>
+                </>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
+
         {address ? (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <MapPin className="size-3.5 shrink-0" />
+          <div className="flex items-center gap-2 text-sm text-muted-foreground min-w-0">
+            <MapPin className="size-3.5 shrink-0 text-muted-foreground/80" />
             <span className="truncate">{address}</span>
           </div>
         ) : null}
-        <div className="flex flex-wrap items-center gap-2">
+
+        <div className="flex flex-wrap items-center gap-1.5">
           {region ? (
-            <Badge variant="secondary" className="font-normal">
+            <Badge variant="secondary" className="font-normal text-xs">
               {region}
             </Badge>
           ) : null}
           {project_type ? (
-            <Badge variant="outline" className="font-normal">
+            <Badge variant="outline" className="font-normal text-xs">
               {project_type}
             </Badge>
           ) : null}
         </div>
+
         {readiness != null && (
-          <div className="space-y-1.5">
+          <div className="space-y-2">
             <div className="flex items-center justify-between text-xs">
               <span className="text-muted-foreground">Planning readiness</span>
-              <span className="font-medium tabular-nums">{readiness}%</span>
+              <ProjectHealthBadge status={status} showScore={true} className="shrink-0 ml-2" />
             </div>
-            <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden" role="progressbar" aria-valuenow={readiness} aria-valuemin={0} aria-valuemax={100}>
-              <div className="h-full bg-primary transition-all" style={{ width: `${readiness}%` }} />
+            <div
+              className="h-2 w-full rounded-full bg-muted/80 overflow-hidden"
+              role="progressbar"
+              aria-valuenow={readiness}
+              aria-valuemin={0}
+              aria-valuemax={100}
+            >
+              <div
+                className="h-full rounded-full bg-primary/80 transition-all"
+                style={{ width: `${readiness}%` }}
+              />
             </div>
             {nextAction && (nextAction.href || nextAction.label) && (
-              <Button type="button" variant="secondary" size="sm" className="w-full text-xs h-7" asChild>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                className="w-full text-xs h-8"
+                asChild
+              >
                 <Link
                   href={nextAction.href ?? `/projects/${id}/inputs`}
                   onClick={(e) => e.stopPropagation()}
@@ -107,26 +163,27 @@ export function ProjectCard({
             )}
           </div>
         )}
-        <div className="pt-1">
+
+        <div className="pt-0.5">
           <ProjectStatusPills status={status} showLabels={true} />
         </div>
-        <div className="flex items-center justify-between pt-2 border-t border-border">
-          <span className="text-xs text-muted-foreground flex items-center gap-1">
-            <Calendar className="size-3" />
-            {new Date(created_at).toLocaleDateString()}
-          </span>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={(e) => {
-              e.stopPropagation();
-              onOpen();
-            }}
-          >
-            Open
-          </Button>
-        </div>
+      </div>
+
+      <div className="px-5 py-4 border-t border-border/50 flex items-center justify-between gap-3 bg-muted/20">
+        <span className="text-xs text-muted-foreground tabular-nums">
+          {new Date(created_at).toLocaleDateString()}
+        </span>
+        <Button
+          type="button"
+          variant="primary"
+          size="sm"
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpen();
+          }}
+        >
+          Open
+        </Button>
       </div>
     </motion.article>
   );

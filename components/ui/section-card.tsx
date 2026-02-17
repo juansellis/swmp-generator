@@ -21,16 +21,16 @@ export function SectionCard({
   return (
     <div
       className={cn(
-        "rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden",
+        "rounded-xl border border-border/50 bg-card shadow-sm overflow-hidden",
         className
       )}
     >
-      <div className="border-b border-slate-200 bg-white px-6 py-4">
+      <div className="border-b border-border/50 bg-card px-6 py-4">
         <div className="flex items-start justify-between gap-4">
           <div className="space-y-1 min-w-0">
-            <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
+            <h2 className="text-lg font-semibold text-foreground">{title}</h2>
             {description ? (
-              <p className="text-sm text-slate-500">{description}</p>
+              <p className="text-sm text-muted-foreground">{description}</p>
             ) : null}
           </div>
           {actions ? <div className="shrink-0">{actions}</div> : null}

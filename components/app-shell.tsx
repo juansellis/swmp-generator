@@ -30,8 +30,8 @@ export function AppShell({
       )}
     >
       {!hideHeader ? (
-        <div className="sticky top-0 z-10 border-b border-border/80 bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-          <div className={cn("mx-auto w-full max-w-6xl px-4 py-3", containerClassName)}>
+        <div className="sticky top-0 z-10 border-b border-border/50 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+          <div className={cn("mx-auto w-full max-w-[1200px] px-6 py-3", containerClassName)}>
             <div className="flex items-center gap-4">
               <Logo height={36} href="/projects" className="h-9 w-auto" />
               {topNav ? <div className="flex-1">{topNav}</div> : null}
@@ -42,7 +42,7 @@ export function AppShell({
 
       <main className={cn("flex-1", className)}>
         <div
-          className={cn("mx-auto w-full max-w-6xl px-4 py-6 space-y-6", containerClassName)}
+          className={cn("mx-auto w-full max-w-[1200px] px-6 py-6 space-y-6", containerClassName)}
         >
           {children}
         </div>
