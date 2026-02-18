@@ -341,12 +341,7 @@ export function StreamPlanningCard({
     }
   };
 
-  const outcomeToOptions = (): string[] => {
-    if (plan.intended_outcome === "reuse") return ["Reuse"];
-    if (plan.intended_outcome === "landfill") return ["Landfill"];
-    if (plan.intended_outcome === "recycle") return ["Recycle"];
-    return ["Recycle"];
-  };
+  const displayOutcome = plan.intended_outcome_display ?? "Recycle";
 
   const handleOutcomeChange = async (value: string) => {
     setOutcomeUpdating(true);
@@ -534,7 +529,7 @@ export function StreamPlanningCard({
           </div>
         </div>
         <Select
-          value={outcomeToOptions()[0] ?? "Recycle"}
+          value={displayOutcome}
           onValueChange={(v) => handleOutcomeChange(v)}
           disabled={outcomeUpdating}
         >

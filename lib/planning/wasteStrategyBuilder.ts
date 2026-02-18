@@ -72,6 +72,8 @@ export type StreamPlanItem = {
   recommended_partner_id: string | null;
   recommended_partner_name: string | null;
   intended_outcome: IntendedOutcomeLabel;
+  /** Single disposal method string for display (e.g. "Recover", "Cleanfill"). */
+  intended_outcome_display: string;
   rationale: string[];
   actions: { type: string; label: string; impact_hint: string }[];
 };
@@ -181,15 +183,15 @@ function classifySignificance(totalTonnes: number): "major" | "medium" | "minor"
 }
 
 function getIntendedOutcomeLabel(outcomes: string[]): IntendedOutcomeLabel {
-  if (!outcomes?.length) return "unknown";
-  const set = new Set(outcomes.map((o) => String(o).trim()));
-  if (set.has("Landfill")) return "landfill";
-  if (set.has("Reuse")) return "reuse";
+  const single = outcomes?.length ? String(outcomes[0]).trim() : "";
+  if (!single) return "unknown";
+  if (single === "Landfill") return "landfill";
+  if (single === "Reuse") return "reuse";
   if (
-    set.has("Recycle") ||
-    set.has("Recover") ||
-    set.has("Cleanfill") ||
-    set.has("Reduce")
+    single === "Recycle" ||
+    single === "Recover" ||
+    single === "Cleanfill" ||
+    single === "Reduce"
   )
     return "recycle";
   return "unknown";
@@ -402,6 +404,7 @@ function buildStreamPlan(
     recommended_partner_id: partnerId ?? null,
     recommended_partner_name: partnerName ?? null,
     intended_outcome: intendedOutcome,
+    intended_outcome_display: (plan.intended_outcomes ?? [])[0] ?? "Recycle",
     rationale,
     actions,
   };

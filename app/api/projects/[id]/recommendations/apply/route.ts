@@ -72,7 +72,8 @@ function applyActionToInputs(
       return { ...inputs, waste_stream_plans: plans };
     }
     case "set_outcome": {
-      const defaultOutcomes = Array.isArray(payload.intended_outcomes) ? (payload.intended_outcomes as string[]) : ["Recycle"];
+      const raw = Array.isArray(payload.intended_outcomes) ? (payload.intended_outcomes as string[]) : [];
+      const defaultOutcomes = raw.length ? [raw[0]] : ["Recycle"];
       const plans = (inputs.waste_stream_plans ?? []).map((p) =>
         isUnknownOutcome(p.intended_outcomes) ? { ...p, intended_outcomes: defaultOutcomes } : p
       );

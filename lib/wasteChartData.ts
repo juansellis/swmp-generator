@@ -65,8 +65,8 @@ export function buildWasteChartData(inputs: SwmpInputsForChart | null | undefine
 
     if (totalTonnes <= 0) continue;
 
-    const outcomes = p?.intended_outcomes ?? [];
-    const isLandfill = outcomes.includes("Landfill");
+    const singleOutcome = (p?.intended_outcomes ?? [])[0];
+    const isLandfill = singleOutcome === "Landfill";
     if (isLandfill) {
       diversionSummary[1].value += totalTonnes;
     } else {

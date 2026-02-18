@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
 import { ProjectPhasePills } from "@/components/project-phase-pills";
 import {
   DropdownMenu,
@@ -56,7 +57,7 @@ export function ProjectCard({
       transition={{ duration: 0.2 }}
       className={cn(
         "rounded-xl border border-border/50 bg-card shadow-sm overflow-hidden text-left",
-        "hover:border-border hover:shadow-sm transition-all duration-200",
+        "transition-all duration-200 hover:scale-[1.01] hover:shadow-md hover:border-border",
         "flex flex-col",
         className
       )}
@@ -130,22 +131,19 @@ export function ProjectCard({
           <div className="space-y-2">
             <div className="flex items-center justify-between text-xs">
               <span className="text-muted-foreground">Planning readiness</span>
-              <Badge variant={readiness === 100 ? "default" : "secondary"} className="shrink-0 ml-2 tabular-nums">
+              <Badge
+                variant="secondary"
+                className={cn(
+                  "shrink-0 ml-2 tabular-nums",
+                  readiness >= 80 && "bg-green-500/15 text-green-700 border-green-500/40 dark:text-green-400 dark:border-green-500/40",
+                  readiness >= 40 && readiness < 80 && "bg-blue-500/15 text-blue-700 border-blue-500/40 dark:text-blue-400 dark:border-blue-500/40",
+                  readiness < 40 && "bg-amber-500/15 text-amber-700 border-amber-500/40 dark:text-amber-400 dark:border-amber-500/40"
+                )}
+              >
                 {readiness}%
               </Badge>
             </div>
-            <div
-              className="h-2 w-full rounded-full bg-muted/80 overflow-hidden"
-              role="progressbar"
-              aria-valuenow={readiness}
-              aria-valuemin={0}
-              aria-valuemax={100}
-            >
-              <div
-                className="h-full rounded-full bg-primary/80 transition-all"
-                style={{ width: `${readiness}%` }}
-              />
-            </div>
+            <Progress value={readiness} className="h-1.5 mt-2" />
             {nextAction && (nextAction.href || nextAction.label) && (
               <Button
                 type="button"

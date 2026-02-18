@@ -315,6 +315,7 @@ import {
   type SiteControlsInput,
   type PlanUnit,
 } from "@/lib/swmp/model";
+import { computeWasteStreamCompletion, hasDestinationSet, hasDisposalSet } from "@/lib/swmp/streamCompletion";
 import {
   getDefaultUnitForStreamLabel,
   getDefaultThicknessForStreamLabel,
@@ -1021,29 +1022,17 @@ export default function ProjectInputsPage() {
   // Guided builder progress (completion engine for Plan Builder)
   const builderProgressInput: BuilderProgressInput = useMemo(
     () => {
-      const hasDest = (p: {
-        facility_id?: string | null;
-        destination_mode?: string | null;
-        custom_destination_address?: string | null;
-        custom_destination_place_id?: string | null;
-        destination_override?: string | null;
-      }) =>
-        (p.facility_id != null && String(p.facility_id).trim() !== "") ||
-        (p.destination_mode === "custom" &&
-          ((p.custom_destination_address ?? "").trim() !== "" ||
-            (p.custom_destination_place_id ?? "").trim() !== "")) ||
-        (p.destination_override != null && String(p.destination_override).trim() !== "");
       const allStreamsHaveDestination =
         selectedWasteStreams.length > 0 &&
         selectedWasteStreams.every((stream) => {
           const plan = streamPlans.find((p) => p.category === stream);
-          return plan && hasDest(plan);
+          return hasDestinationSet(plan);
         });
       const allStreamsHaveDisposal =
         selectedWasteStreams.length > 0 &&
         selectedWasteStreams.every((stream) => {
           const plan = streamPlans.find((p) => p.category === stream);
-          return plan && (plan.intended_outcomes?.length ?? 0) > 0;
+          return hasDisposalSet(plan);
         });
       const hasPlannedTonnes = streamPlans.some(
         (p) => (p.manual_qty_tonnes ?? 0) + (p.forecast_qty ?? 0) > 0
@@ -1059,7 +1048,7 @@ export default function ProjectInputsPage() {
         hasPlannedTonnes,
         allStreamsHaveDestination,
         allStreamsHaveDisposal,
-        hasFacilityOrDestination: streamPlans.some(hasDest),
+        hasFacilityOrDestination: streamPlans.some((p) => hasDestinationSet(p)),
         primaryWasteContractorPartnerId: primaryWasteContractorPartnerId ?? null,
         constraints: selectedConstraints,
         siteControls,
@@ -1338,6 +1327,7 @@ export default function ProjectInputsPage() {
 
     if (!projectId) {
       setSaveError("Missing project id.");
+      toast.error("Missing project");
       return;
     }
 
@@ -1345,52 +1335,62 @@ export default function ProjectInputsPage() {
       setSaveError(
         "Please complete Project details (required) before saving inputs or generating the SWMP."
       );
+      toast.error("Complete required fields first");
       return;
     }
 
     setIsGenerating(true);
     try {
+      const saved = await handleSaveInputs({ preventDefault: () => {} } as React.FormEvent);
+      if (!saved) {
+        toast.error("Save inputs first, then generate report");
+        return;
+      }
       const res = await fetch("/api/generate-swmp", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ project_id: projectId }),
       });
-  
+
       const data = await res.json();
       if (!res.ok) {
         setSaveError(data?.error ?? "Failed to generate SWMP");
+        toast.error(data?.error ?? "Report generation failed");
         return;
       }
-  
+
+      toast.success("Report generated");
       router.push(`/projects/${projectId}/swmp`);
     } catch (e: any) {
       setSaveError(e?.message ?? "Failed to generate SWMP");
+      toast.error(e?.message ?? "Report generation failed");
     } finally {
       setIsGenerating(false);
     }
   }
 
 
-  async function handleSaveInputs(e: React.FormEvent) {
+  /** Returns true if save completed successfully, false otherwise. Caller can await to ensure DB is updated before e.g. Generate SWMP. */
+  async function handleSaveInputs(e: React.FormEvent): Promise<boolean> {
     e.preventDefault();
     setSaveError(null);
     setSaveMessage(null);
 
     if (!projectId) {
       setSaveError("Missing project id.");
-      return;
+      return false;
     }
 
     if (!requiredOk) {
       setSaveError(
         "Please complete Project details (required) before saving inputs or generating the SWMP."
       );
-      return;
+      return false;
     }
 
     if (selectedWasteStreams.length === 0) {
       setSaveError("Select at least one waste stream.");
-      return;
+      return false;
     }
 
     scrollPositionBeforeSaveRef.current = window.scrollY;
@@ -1403,10 +1403,17 @@ export default function ProjectInputsPage() {
         constraints: selectedConstraints,
         waste_streams: selectedWasteStreams,
         hazards,
-        waste_stream_plans: streamPlans.map((p) => ({
-          ...p,
-          manual_qty_tonnes: planManualQtyToTonnes(p, p.category) ?? null,
-        })),
+        waste_stream_plans: streamPlans.map((p) => {
+          const manualTonnes =
+            p.manual_qty_tonnes != null && Number.isFinite(p.manual_qty_tonnes) && p.manual_qty_tonnes >= 0
+              ? p.manual_qty_tonnes
+              : (planManualQtyToTonnes(p, p.category) ?? null);
+          return {
+            ...p,
+            manual_qty_tonnes: manualTonnes,
+            intended_outcomes: (p.intended_outcomes?.length ? [p.intended_outcomes[0]] : ["Recycle"]) as string[],
+          };
+        }),
         responsibilities: responsibilities.map((r) => {
           const list = r.responsibilities.filter(Boolean);
           return {
@@ -1447,7 +1454,8 @@ export default function ProjectInputsPage() {
 
       if (error) {
         setSaveError(error.message || "Failed to save inputs.");
-        return;
+        toast.error("Save failed");
+        return false;
       }
 
       // Persist Primary Waste Contractor on project row (source of truth is projects.primary_waste_contractor_partner_id)
@@ -1459,7 +1467,8 @@ export default function ProjectInputsPage() {
 
       if (projectUpdateError) {
         setSaveError(projectUpdateError.message || "Inputs saved but Primary Waste Contractor could not be updated.");
-        return;
+        toast.error("Primary contractor could not be updated");
+        return false;
       }
 
       if (project && projectContext?.project?.id === projectId) {
@@ -1510,6 +1519,7 @@ export default function ProjectInputsPage() {
       setLastSavedAt(new Date());
       setSaveMessage("Inputs saved.");
       toast.success("Saved");
+      return true;
     } finally {
       setSaveLoading(false);
     }
@@ -1530,9 +1540,16 @@ export default function ProjectInputsPage() {
       const y = scrollPositionBeforeSaveRef.current;
       scrollPositionBeforeSaveRef.current = null;
       if (y !== null && Number.isFinite(y)) {
+        const restore = () => window.scrollTo(0, y);
         requestAnimationFrame(() => {
-          requestAnimationFrame(() => window.scrollTo(0, y));
+          requestAnimationFrame(restore);
         });
+        const t1 = window.setTimeout(restore, 50);
+        const t2 = window.setTimeout(restore, 150);
+        return () => {
+          window.clearTimeout(t1);
+          window.clearTimeout(t2);
+        };
       }
     }
     prevSaveLoadingRef.current = saveLoading;
@@ -2325,23 +2342,10 @@ export default function ProjectInputsPage() {
                 completion={{
                   completed: (() => {
                     if (selectedWasteStreams.length === 0) return 0;
-                    const hasDest = (p: WasteStreamPlan) =>
-                      (p.destination_mode === "custom" &&
-                        ((p.custom_destination_name ?? "").trim() !== "" ||
-                          (p.custom_destination_address ?? "").trim() !== "" ||
-                          (p.custom_destination_place_id ?? "").trim() !== "")) ||
-                      (p.facility_id != null && String(p.facility_id).trim() !== "");
-                    const complete = selectedWasteStreams.filter((stream) => {
+                    return selectedWasteStreams.filter((stream) => {
                       const plan = streamPlans.find((p) => p.category === stream);
-                      const hasTonnes = (plan?.manual_qty_tonnes ?? 0) + (plan?.forecast_qty ?? 0) > 0;
-                      return (
-                        plan &&
-                        (plan.intended_outcomes?.length ?? 0) > 0 &&
-                        hasDest(plan) &&
-                        hasTonnes
-                      );
+                      return computeWasteStreamCompletion(plan, { requireTonnes: true });
                     }).length;
-                    return complete;
                   })(),
                   total: Math.max(selectedWasteStreams.length, 1),
                 }}
@@ -2534,10 +2538,13 @@ export default function ProjectInputsPage() {
                         constraints: selectedConstraints,
                         waste_streams: selectedWasteStreams,
                         hazards,
-                        waste_stream_plans: nextPlans.map((p) => ({
-                          ...p,
-                          manual_qty_tonnes: planManualQtyToTonnes(p, p.category) ?? null,
-                        })),
+                        waste_stream_plans: nextPlans.map((p) => {
+                          const manualTonnes =
+                            p.manual_qty_tonnes != null && Number.isFinite(p.manual_qty_tonnes) && p.manual_qty_tonnes >= 0
+                              ? p.manual_qty_tonnes
+                              : (planManualQtyToTonnes(p, p.category) ?? null);
+                          return { ...p, manual_qty_tonnes: manualTonnes };
+                        }),
                         responsibilities: responsibilities.map((r) => {
                           const list = r.responsibilities.filter(Boolean);
                           return {
@@ -2627,13 +2634,7 @@ export default function ProjectInputsPage() {
                         const facility = plan?.facility_id ? facilityList.find((f) => f.id === plan.facility_id) : null;
                         const manualTonnesRaw = plan?.manual_qty_tonnes ?? (plan ? planManualQtyToTonnes(plan, stream) : null);
                         const manualTonnesNum = manualTonnesRaw != null && Number.isFinite(manualTonnesRaw) ? Number(manualTonnesRaw) : null;
-                        const hasDest =
-                          plan?.destination_mode === "custom"
-                            ? ((plan?.custom_destination_name ?? plan?.custom_destination_address ?? "").trim() !== "" ||
-                                (plan?.custom_destination_place_id ?? "").trim() !== "")
-                            : plan?.facility_id != null && String(plan.facility_id).trim() !== "";
-                        const hasDisposal = (plan?.intended_outcomes?.length ?? 0) > 0;
-                        const streamComplete = hasDisposal && hasDest;
+                        const streamComplete = computeWasteStreamCompletion(plan);
                         const expanded = expandedStreamPlans[stream] ?? false;
                         return (
                           <tr
@@ -2662,30 +2663,37 @@ export default function ProjectInputsPage() {
                               />
                             </td>
                             <td className="px-4 py-2 align-middle">
-                              <Select
-                                value={(plan?.intended_outcomes?.length ? plan.intended_outcomes[0] : "Recycle") ?? "Recycle"}
-                                onValueChange={(v) => {
-                                  setStreamPlans((prev) =>
-                                    prev.map((p) =>
-                                      p.category === stream
-                                        ? { ...p, intended_outcomes: [v], hadMultipleOutcomes: false }
-                                        : p
-                                    )
-                                  );
-                                }}
-                                disabled={saveLoading}
-                              >
-                                <SelectTrigger className="h-8 w-full min-w-[120px] bg-background">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {INTENDED_OUTCOME_OPTIONS.map((opt) => (
-                                    <SelectItem key={opt} value={opt}>
-                                      {opt}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <Select
+                                  value={(plan?.intended_outcomes?.length ? plan.intended_outcomes[0] : "Recycle") ?? "Recycle"}
+                                  onValueChange={(v) => {
+                                    setStreamPlans((prev) =>
+                                      prev.map((p) =>
+                                        p.category === stream
+                                          ? { ...p, intended_outcomes: [v], hadMultipleOutcomes: false }
+                                          : p
+                                      )
+                                    );
+                                  }}
+                                  disabled={saveLoading}
+                                >
+                                  <SelectTrigger className="h-8 w-full min-w-[120px] bg-background">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {INTENDED_OUTCOME_OPTIONS.map((opt) => (
+                                      <SelectItem key={opt} value={opt}>
+                                        {opt}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                                {plan?.hadMultipleOutcomes && (
+                                  <Badge variant="secondary" className="text-[10px] font-normal bg-amber-500/15 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-400 shrink-0">
+                                    Multiple methods detected; please confirm
+                                  </Badge>
+                                )}
+                              </div>
                             </td>
                             <td className="px-4 py-2 align-middle">
                               {effectivePartnerId ? (
@@ -2826,11 +2834,8 @@ export default function ProjectInputsPage() {
                     const resolvedPartner = effectivePartnerId ? catalogPartners.find((p) => p.id === effectivePartnerId) ?? null : null;
                     const rawFacility = effectivePartnerId && facilitiesByPartner[effectivePartnerId]?.find((f) => f.id === safePlan.facility_id);
                     const resolvedFacility = rawFacility && typeof rawFacility === "object" && "name" in rawFacility ? rawFacility : null;
-                    const summaryOutcomes = (
-                      safePlan.intended_outcomes?.length
-                        ? safePlan.intended_outcomes
-                        : ["Recycle"]
-                    ).join(", ");
+                    const summaryOutcomes =
+                      (safePlan.intended_outcomes?.length ? safePlan.intended_outcomes[0] : "Recycle") ?? "Recycle";
                     const summaryManualTonnes = safePlan.manual_qty_tonnes ?? planManualQtyToTonnes(safePlan, stream) ?? 0;
                     const summaryForecastTonnes = safePlan.forecast_qty != null && safePlan.forecast_qty >= 0 ? Number(safePlan.forecast_qty) : 0;
                     const summaryTotalTonnes = summaryManualTonnes + summaryForecastTonnes;
@@ -2847,8 +2852,7 @@ export default function ProjectInputsPage() {
                     const summaryDestinationTruncated =
                       summaryDestination.length > 50 ? `${summaryDestination.slice(0, 47)}…` : summaryDestination;
 
-                    const hasDestination = (summaryDestination ?? "").trim() !== "" && summaryDestination !== "—";
-                    const streamComplete = (safePlan.intended_outcomes?.length ?? 0) > 0 && hasDestination;
+                    const streamComplete = computeWasteStreamCompletion(safePlan);
                     return (
                       <StreamRow
                         key={stream}

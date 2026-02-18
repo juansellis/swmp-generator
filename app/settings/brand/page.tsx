@@ -5,10 +5,16 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
 import { AppShell } from "@/components/app-shell";
-import { SubPanel } from "@/components/form-section";
 import { PageHeader } from "@/components/page-header";
-import { SectionCard } from "@/components/ui/section-card";
-import { Notice } from "@/components/notice";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -36,7 +42,6 @@ export default function BrandSettingsPage() {
 
   const [org, setOrg] = useState<Org | null>(null);
 
-  // Form state
   const [name, setName] = useState("");
   const [brandPrimary, setBrandPrimary] = useState("#111111");
   const [brandSecondary, setBrandSecondary] = useState("#666666");
@@ -46,7 +51,6 @@ export default function BrandSettingsPage() {
   const [website, setWebsite] = useState("");
   const [logoUrl, setLogoUrl] = useState<string>("");
 
-  // Logo upload state
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
 
@@ -61,7 +65,6 @@ export default function BrandSettingsPage() {
         return;
       }
 
-      // Get org for this user via org_members
       const { data: member, error: memErr } = await supabase
         .from("org_members")
         .select("org_id")
@@ -87,18 +90,14 @@ export default function BrandSettingsPage() {
       }
 
       setOrg(orgData);
-
-      // Populate form
       setName(orgData.name ?? "");
-      // Support both brand_primary_colour and brand_primary for backwards compatibility
-      setBrandPrimary((orgData as any).brand_primary_colour ?? orgData.brand_primary ?? "#111111");
+      setBrandPrimary((orgData as { brand_primary_colour?: string }).brand_primary_colour ?? orgData.brand_primary ?? "#111111");
       setBrandSecondary(orgData.brand_secondary ?? "#666666");
       setFooterText(orgData.footer_text ?? "");
       setContactEmail(orgData.contact_email ?? "");
       setContactPhone(orgData.contact_phone ?? "");
       setWebsite(orgData.website ?? "");
       setLogoUrl(orgData.logo_url ?? "");
-
       setLoading(false);
     })();
   }, [router]);
@@ -108,12 +107,12 @@ export default function BrandSettingsPage() {
     setSaveMsg(null);
     setPageError(null);
 
-      const { error } = await supabase
+    const { error } = await supabase
       .from("orgs")
       .update({
         name,
         brand_primary: brandPrimary,
-        brand_primary_colour: brandPrimary, // Also save as brand_primary_colour
+        brand_primary_colour: brandPrimary,
         brand_secondary: brandSecondary,
         footer_text: footerText,
         contact_email: contactEmail,
@@ -139,10 +138,7 @@ export default function BrandSettingsPage() {
     setUploadProgress(0);
 
     try {
-      // Store as: org-assets/<orgId>/logo.png (or original filename)
       const path = `${org.id}/${Date.now()}-${file.name}`;
-
-      // Simulate progress (Supabase doesn't provide upload progress in the current API)
       const progressInterval = setInterval(() => {
         setUploadProgress((prev) => Math.min(prev + 10, 90));
       }, 100);
@@ -162,12 +158,10 @@ export default function BrandSettingsPage() {
       }
 
       const { data } = supabase.storage.from("org-assets").getPublicUrl(path);
-      const publicUrl = data.publicUrl;
-
-      setLogoUrl(publicUrl);
+      setLogoUrl(data.publicUrl);
       setSaveMsg("Logo uploaded. Click Save to apply.");
-    } catch (error: any) {
-      setPageError(error?.message ?? "Failed to upload logo");
+    } catch (error: unknown) {
+      setPageError(error instanceof Error ? error.message : "Failed to upload logo");
     } finally {
       setUploading(false);
       setTimeout(() => setUploadProgress(0), 500);
@@ -186,212 +180,227 @@ export default function BrandSettingsPage() {
 
   return (
     <AppShell>
-      <div className="space-y-6">
+      <div className="max-w-3xl mx-auto px-4 py-6 space-y-6">
         <PageHeader
-          title="Brand Settings"
-          subtitle="Customise your organisation's branding and contact information."
+          title="Settings"
+          subtitle="Manage your organisation branding and preferences."
           actions={
-            <Button variant="outline" size="default" onClick={() => router.push("/projects")}>
-              ← Back
-            </Button>
+            <div className="flex items-center gap-3">
+              {saveMsg && (
+                <span className="text-sm text-muted-foreground" aria-live="polite">
+                  {saveMsg}
+                </span>
+              )}
+              <Button variant="outline" size="default" onClick={() => router.push("/projects")}>
+                ← Back
+              </Button>
+            </div>
           }
         />
 
-        {pageError ? (
-          <Notice type="error" title="Error" message={pageError} />
-        ) : null}
+        {pageError && (
+          <div
+            role="alert"
+            className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive"
+          >
+            {pageError}
+          </div>
+        )}
 
-        {saveMsg ? (
-          <Notice type="success" title="Success" message={saveMsg} />
-        ) : null}
-
-        <SectionCard
-          title="Organisation"
-          description="Configure your organisation's branding, contact information and logo."
-          contentClassName="space-y-6 min-w-0"
-        >
-          <SubPanel>
+        <Card>
+          <CardHeader>
+            <CardTitle>Branding</CardTitle>
+            <CardDescription>
+              Organisation name, colours, footer text, and contact details used in generated reports.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-6">
             <div className="grid gap-2">
-              <Label>Organisation name</Label>
-              <Input value={name} onChange={(e) => setName(e.target.value)} className="w-full min-w-0" />
+              <Label htmlFor="org-name">Organisation name</Label>
+              <Input
+                id="org-name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className="max-w-md"
+              />
             </div>
-          </SubPanel>
 
-          <SubPanel>
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-4 sm:grid-cols-2 max-w-md">
               <div className="grid gap-2">
-                <Label>Primary colour</Label>
-                <div className="flex gap-2 min-w-0">
+                <Label htmlFor="brand-primary">Primary colour</Label>
+                <div className="flex gap-2">
                   <Input
+                    id="brand-primary"
                     type="color"
                     value={brandPrimary}
                     onChange={(e) => setBrandPrimary(e.target.value)}
-                    className="h-10 w-20 cursor-pointer shrink-0"
+                    className="h-10 w-14 cursor-pointer shrink-0 p-1"
                   />
                   <Input
                     value={brandPrimary}
                     onChange={(e) => setBrandPrimary(e.target.value)}
                     placeholder="#111111"
-                    className="flex-1 min-w-0"
+                    className="flex-1"
                   />
                 </div>
               </div>
               <div className="grid gap-2">
-                <Label>Secondary colour</Label>
-                <div className="flex gap-2 min-w-0">
+                <Label htmlFor="brand-secondary">Secondary colour</Label>
+                <div className="flex gap-2">
                   <Input
+                    id="brand-secondary"
                     type="color"
                     value={brandSecondary}
                     onChange={(e) => setBrandSecondary(e.target.value)}
-                    className="h-10 w-20 cursor-pointer shrink-0"
+                    className="h-10 w-14 cursor-pointer shrink-0 p-1"
                   />
                   <Input
                     value={brandSecondary}
                     onChange={(e) => setBrandSecondary(e.target.value)}
                     placeholder="#666666"
-                    className="flex-1 min-w-0"
+                    className="flex-1"
                   />
                 </div>
               </div>
             </div>
-          </SubPanel>
 
-          <SubPanel>
             <div className="grid gap-2">
-              <Label>Footer / disclaimer text</Label>
+              <Label htmlFor="footer-text">Footer / disclaimer text</Label>
               <Textarea
+                id="footer-text"
                 value={footerText}
                 onChange={(e) => setFooterText(e.target.value)}
                 rows={3}
-                placeholder="Text to display in the footer of generated SWMP reports"
-                className="w-full min-w-0"
+                placeholder="Text shown in the footer of generated SWMP reports"
+                className="max-w-2xl"
               />
             </div>
-          </SubPanel>
 
-          <SubPanel>
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-4 sm:grid-cols-2 max-w-2xl">
               <div className="grid gap-2">
-                <Label>Contact email</Label>
+                <Label htmlFor="contact-email">Contact email</Label>
                 <Input
+                  id="contact-email"
                   type="email"
                   value={contactEmail}
                   onChange={(e) => setContactEmail(e.target.value)}
                   placeholder="contact@example.com"
-                  className="w-full min-w-0"
                 />
               </div>
               <div className="grid gap-2">
-                <Label>Contact phone</Label>
+                <Label htmlFor="contact-phone">Contact phone</Label>
                 <Input
+                  id="contact-phone"
                   type="tel"
                   value={contactPhone}
                   onChange={(e) => setContactPhone(e.target.value)}
                   placeholder="+64 9 123 4567"
-                  className="w-full min-w-0"
                 />
               </div>
             </div>
-            <div className="grid gap-2 mt-4">
-              <Label>Website</Label>
+            <div className="grid gap-2 max-w-2xl">
+              <Label htmlFor="website">Website</Label>
               <Input
+                id="website"
                 type="url"
                 value={website}
                 onChange={(e) => setWebsite(e.target.value)}
                 placeholder="https://example.com"
-                className="w-full min-w-0"
               />
             </div>
-          </SubPanel>
 
-          <SubPanel>
-            <div className="grid gap-3">
+            <Separator />
+
+            <div className="space-y-3">
               <Label>Logo</Label>
-              {logoUrl ? (
-                <div className="flex items-center gap-3 min-w-0 flex-wrap">
-                  <div className="shrink-0 h-16 w-16 rounded-md border bg-white flex items-center justify-center overflow-hidden">
-                    <img
-                      src={logoUrl}
-                      alt="Organisation logo"
-                      className="h-full w-full object-contain"
+              <div className="flex flex-col sm:flex-row items-start gap-4 min-w-0">
+                <div className="shrink-0">
+                  {logoUrl ? (
+                    <div className="h-16 w-16 rounded-lg border border-border bg-muted/30 flex items-center justify-center overflow-hidden">
+                      <img src={logoUrl} alt="Organisation logo" className="h-full w-full object-contain" />
+                    </div>
+                  ) : (
+                    <div className="h-16 w-16 rounded-lg border border-dashed border-border bg-muted/20 flex items-center justify-center">
+                      <UploadIcon className="size-8 text-muted-foreground" />
+                    </div>
+                  )}
+                </div>
+                <div className="flex-1 min-w-0 space-y-2 w-full">
+                  {logoUrl && (
+                    <p className="text-sm text-muted-foreground truncate" title={logoUrl}>
+                      Current logo
+                    </p>
+                  )}
+                  {uploading && (
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">Uploading…</span>
+                        <span className="font-medium tabular-nums">{uploadProgress}%</span>
+                      </div>
+                      <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
+                        <div
+                          className="h-full bg-primary transition-all duration-300"
+                          style={{ width: `${uploadProgress}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Input
+                      type="file"
+                      accept="image/png,image/jpeg,image/svg+xml"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) handleLogoUpload(f);
+                      }}
+                      disabled={uploading}
+                      className="max-w-[200px]"
                     />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="default"
+                      onClick={() => {
+                        const input = document.createElement("input");
+                        input.type = "file";
+                        input.accept = "image/png,image/jpeg,image/svg+xml";
+                        input.onchange = (e) => {
+                          const f = (e.target as HTMLInputElement).files?.[0];
+                          if (f) handleLogoUpload(f);
+                        };
+                        input.click();
+                      }}
+                      disabled={uploading}
+                    >
+                      <UploadIcon className="size-4" />
+                      Choose file
+                    </Button>
+                    {logoUrl && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="default"
+                        className="ml-auto text-destructive hover:text-destructive hover:bg-destructive/10"
+                        onClick={() => setLogoUrl("")}
+                      >
+                        <XIcon className="size-4" />
+                        Remove
+                      </Button>
+                    )}
                   </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium">Current logo</p>
-                    <p className="text-xs text-muted-foreground break-all">{logoUrl}</p>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setLogoUrl("")}
-                  >
-                    <XIcon className="size-4" />
-                    Remove
-                  </Button>
+                  <p className="text-xs text-muted-foreground">
+                    PNG, JPEG, or SVG. Recommended max 2MB.
+                  </p>
                 </div>
-              ) : (
-                <div className="border-2 border-dashed rounded-lg p-6 text-center bg-muted/30">
-                  <UploadIcon className="size-8 mx-auto mb-2 text-muted-foreground" />
-                  <p className="text-sm text-muted-foreground mb-3">No logo uploaded yet</p>
-                </div>
-              )}
-              {uploading && (
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">Uploading logo...</span>
-                    <span className="font-medium">{uploadProgress}%</span>
-                  </div>
-                  <div className="h-2 w-full bg-muted rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-primary transition-all duration-300"
-                      style={{ width: `${uploadProgress}%` }}
-                    />
-                  </div>
-                </div>
-              )}
-              <div className="flex items-center gap-2 flex-wrap">
-                <Input
-                  type="file"
-                  accept="image/png,image/jpeg,image/svg+xml"
-                  onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    if (f) handleLogoUpload(f);
-                  }}
-                  disabled={uploading}
-                  className="flex-1 min-w-[140px]"
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => {
-                    const input = document.createElement("input");
-                    input.type = "file";
-                    input.accept = "image/png,image/jpeg,image/svg+xml";
-                    input.onchange = (e) => {
-                      const f = (e.target as HTMLInputElement).files?.[0];
-                      if (f) handleLogoUpload(f);
-                    };
-                    input.click();
-                  }}
-                  disabled={uploading}
-                >
-                  <UploadIcon className="size-4" />
-                  Choose File
-                </Button>
               </div>
-              <p className="text-xs text-muted-foreground">
-                Supported formats: PNG, JPEG, SVG. Maximum file size recommended: 2MB.
-              </p>
             </div>
-          </SubPanel>
-
-          <SubPanel className="shadow-sm">
-            <Button variant="primary" size="default" onClick={handleSave} disabled={uploading} className="w-full">
-              Save Settings
+          </CardContent>
+          <CardFooter className="flex justify-end border-t border-border/50 pt-6">
+            <Button variant="primary" size="default" onClick={handleSave} disabled={uploading}>
+              Save changes
             </Button>
-          </SubPanel>
-        </SectionCard>
+          </CardFooter>
+        </Card>
       </div>
     </AppShell>
   );

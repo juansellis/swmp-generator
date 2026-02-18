@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import type { DashboardMetricsResponse } from "@/app/api/dashboard/metrics/route";
 import type { PlanningChecklist } from "@/lib/planning/planningChecklist";
+import { cn } from "@/lib/utils";
 
 type ProjectRow = {
   id: string;
@@ -69,22 +70,36 @@ function formatTonnes(n: number): string {
   return n.toFixed(3);
 }
 
+const KPI_VARIANTS = {
+  blue: "border-t-4 border-blue-500/40 bg-blue-50/40 dark:bg-blue-950/20 [&_.kpi-icon]:text-primary",
+  green: "border-t-4 border-green-500/40 bg-green-50/40 dark:bg-green-950/20 [&_.kpi-icon]:text-green-600 dark:[&_.kpi-icon]:text-green-400",
+  purple: "border-t-4 border-purple-500/40 bg-purple-50/40 dark:bg-purple-950/20 [&_.kpi-icon]:text-purple-600 dark:[&_.kpi-icon]:text-purple-400",
+  amber: "border-t-4 border-amber-500/40 bg-amber-50/40 dark:bg-amber-950/20 [&_.kpi-icon]:text-amber-600 dark:[&_.kpi-icon]:text-amber-400",
+} as const;
+
 /** Stat card for dashboard KPIs */
 function StatCard({
   icon,
   label,
   value,
   loading,
+  variant = "blue",
 }: {
   icon: React.ReactNode;
   label: string;
   value: number | string | undefined;
   loading: boolean;
+  variant?: keyof typeof KPI_VARIANTS;
 }) {
   return (
-    <div className="rounded-xl border border-border/50 bg-card shadow-sm p-5 min-h-[100px] flex flex-col justify-center">
+    <div
+      className={cn(
+        "rounded-xl border border-border/50 bg-card shadow-sm p-5 min-h-[100px] flex flex-col justify-center transition-colors hover:bg-muted/20",
+        KPI_VARIANTS[variant]
+      )}
+    >
       <div className="flex items-start gap-3">
-        <div className="rounded-lg bg-muted/50 p-2 text-muted-foreground [&>svg]:size-5">
+        <div className="kpi-icon rounded-lg bg-muted/50 p-2 [&>svg]:size-5">
           {icon}
         </div>
         <div className="min-w-0 flex-1 space-y-1">
@@ -445,7 +460,7 @@ export default function ProjectsPage() {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           {/* Left: minimal Create project card */}
           <div className="lg:col-span-4">
-            <div className="rounded-xl border border-border/50 bg-card shadow-sm overflow-hidden p-6">
+            <div className="rounded-xl border border-border/50 bg-gradient-to-r from-muted/30 to-muted/10 shadow-sm overflow-hidden p-6">
               <div className="flex flex-col items-start gap-4">
                 <div className="rounded-lg bg-primary/10 p-3 text-primary">
                   <Plus className="size-6" />
@@ -485,24 +500,28 @@ export default function ProjectsPage() {
                 label="Active projects"
                 value={metrics?.activeProjects}
                 loading={metricsLoading}
+                variant="blue"
               />
               <StatCard
                 icon={<Recycle className="size-5" />}
                 label="Total waste streams"
                 value={metrics?.totalWasteStreamsConfigured}
                 loading={metricsLoading}
+                variant="green"
               />
               <StatCard
                 icon={<Building2 className="size-5" />}
                 label="Facilities utilised"
                 value={metrics?.facilitiesLinked}
                 loading={metricsLoading}
+                variant="purple"
               />
               <StatCard
                 icon={<TrendingUp className="size-5" />}
                 label="Estimated waste (t)"
                 value={metrics?.totalEstimatedWasteTonnes != null ? formatTonnes(metrics.totalEstimatedWasteTonnes) : undefined}
                 loading={metricsLoading}
+                variant="amber"
               />
             </div>
 

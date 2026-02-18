@@ -389,6 +389,29 @@ Output must follow the provided schema exactly.
         }
       }
     }
+    // Overlay waste_streams from canonical inputs so report always shows correct stream names and destinations
+    const plansByCategory = new Map(
+      (swmp.waste_stream_plans ?? []).map((p: { category?: string }) => [p?.category ?? "", p])
+    );
+    swmp.waste_streams = ensuredWasteStreams.map((streamName: string) => {
+      const plan = plansByCategory.get(streamName) as { facility_id?: string | null; custom_destination_name?: string | null; custom_destination_address?: string | null; destination_override?: string | null; destination?: string | null } | undefined;
+      let destination = "—";
+      if (plan?.facility_id && facilityMap[plan.facility_id]) {
+        const f = facilityMap[plan.facility_id];
+        destination = [f.name, f.address].filter(Boolean).join(", ") || f.name || "—";
+      } else if (plan) {
+        const custom = (plan.custom_destination_name ?? plan.custom_destination_address ?? plan.destination_override ?? plan.destination ?? "").trim();
+        if (custom) destination = custom;
+      }
+      return {
+        stream: String(streamName),
+        segregation_method: "Separate where practical",
+        container: "Skip / cage as allocated",
+        handling_notes: "Keep dry/clean, avoid contamination.",
+        destination,
+      };
+    });
+
     const lookups = {
       getPartnerById: (id: string | null | undefined) =>
         id ? partnerMap[id] ?? null : null,
@@ -417,6 +440,20 @@ Output must follow the provided schema exactly.
         computed_waste_kg: r?.computed_waste_kg != null ? Number(r.computed_waste_kg) : null,
         waste_stream_key: r?.waste_stream_key != null ? String(r.waste_stream_key).trim() || null : null,
       }));
+    }
+
+    if (process.env.NODE_ENV === "development") {
+      const plans = (swmp.waste_stream_plans ?? []) as { category?: string; manual_qty_tonnes?: number | null; facility_id?: string | null }[];
+      const streams = (swmp.waste_streams ?? []) as { stream?: string; destination?: string }[];
+      console.debug("[generate-swmp] Report model:", {
+        streamCount: streams.length,
+        streamNames: streams.map((s) => (typeof s === "string" ? s : s?.stream ?? "")),
+        planSummary: plans.slice(0, 5).map((p) => ({
+          name: p?.category,
+          tonnes: p?.manual_qty_tonnes,
+          facility_id: p?.facility_id,
+        })),
+      });
     }
 
     // 5) Render HTML for viewing/export (deterministic renderer uses swmp.branding/footer_text)

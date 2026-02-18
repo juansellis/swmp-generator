@@ -132,11 +132,12 @@ export const WASTE_STREAM_UNIT_DEFAULTS: Record<string, "t" | "m3" | "m2" | "L">
 // Default intended outcomes by stream (for templates)
 // ---------------------------------------------------------------------------
 
+/** Single disposal method per stream. Returns one-element array. */
 export function getDefaultIntendedOutcomesForStream(stream: string): string[] {
   const lower = stream.toLowerCase();
   if (lower.includes("metal")) return ["Recycle"];
   if (lower.includes("cardboard")) return ["Recycle"];
-  if (lower.includes("timber") && lower.includes("untreated")) return ["Reuse", "Recycle"];
+  if (lower.includes("timber") && lower.includes("untreated")) return ["Reuse"];
   if (lower.includes("timber") && lower.includes("treated")) return ["Recover"];
   if (
     lower.includes("concrete") ||
@@ -145,7 +146,7 @@ export function getDefaultIntendedOutcomesForStream(stream: string): string[] {
     lower.includes("asphalt") ||
     lower.includes("roading")
   )
-    return ["Recycle", "Recover"];
+    return ["Recycle"];
   if (
     lower.includes("soil") ||
     lower.includes("cleanfill") ||
@@ -154,7 +155,7 @@ export function getDefaultIntendedOutcomesForStream(stream: string): string[] {
     return ["Cleanfill"];
   if (lower.includes("soft plastic") || lower.includes("wrap") || lower.includes("strapping"))
     return ["Recycle"];
-  if (lower.includes("mixed c&d") || lower.includes("mixed c & d")) return ["Recover", "Landfill"];
+  if (lower.includes("mixed c&d") || lower.includes("mixed c & d")) return ["Recover"];
   return ["Recycle"];
 }
 
@@ -331,13 +332,19 @@ function normalizeWasteStreamPlan(raw: unknown): WasteStreamPlanInput {
   const p = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
   const category = String(p?.category ?? "").trim() || "Mixed C&D";
 
-  const rawIntended = Array.isArray(p?.intended_outcomes)
-    ? p.intended_outcomes
-    : Array.isArray(p?.outcomes)
-      ? p.outcomes
-      : typeof p?.outcome === "string"
-        ? [p.outcome]
-        : [];
+  let rawIntended: string[];
+  if (Array.isArray(p?.intended_outcomes)) {
+    rawIntended = p.intended_outcomes as string[];
+  } else if (Array.isArray(p?.outcomes)) {
+    rawIntended = p.outcomes as string[];
+  } else if (typeof p?.outcome === "string") {
+    rawIntended = [p.outcome];
+  } else if (typeof p?.intended_outcomes === "string" || typeof p?.outcomes === "string") {
+    const s = String((p?.intended_outcomes ?? p?.outcomes) ?? "").trim();
+    rawIntended = s ? s.split(/\s*,\s*/).map((x) => x.trim()).filter(Boolean) : [];
+  } else {
+    rawIntended = [];
+  }
   const normalizeOutcome = (x: string) => {
     const v = String(x ?? "").trim();
     if (v === "Dispose") return "Landfill";
@@ -348,8 +355,9 @@ function normalizeWasteStreamPlan(raw: unknown): WasteStreamPlanInput {
     .map(normalizeOutcome)
     .filter((x) => INTENDED_OUTCOME_SET.has(x));
   const hadMultipleOutcomes = safeIntended.length > 1;
+  /** Enforce single disposal method: first valid option only. */
   const intended_outcomes =
-    safeIntended.length > 0 ? (hadMultipleOutcomes ? [safeIntended[0]] : safeIntended) : ["Recycle"];
+    safeIntended.length > 0 ? [safeIntended[0]] : ["Recycle"];
 
   const rawUnit = p?.unit;
   const unit: PlanUnit | null =

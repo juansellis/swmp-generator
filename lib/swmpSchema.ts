@@ -99,9 +99,10 @@ export const WasteStreamPlanSchema = z.preprocess((val) => {
       : typeof v.outcome === "string"
         ? [v.outcome]
         : [];
-    v.intended_outcomes = normalizeToIntendedOutcomes(rawOutcomes).length
-      ? normalizeToIntendedOutcomes(rawOutcomes)
-      : ["Recycle"];
+    const normalized = normalizeToIntendedOutcomes(rawOutcomes);
+    v.intended_outcomes = normalized.length ? [normalized[0]] : ["Recycle"];
+  } else if (v.intended_outcomes.length > 1) {
+    v.intended_outcomes = [v.intended_outcomes[0]];
   }
 
   // Normalize quantity: accept estimated_quantity or estimated_qty

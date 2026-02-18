@@ -100,7 +100,14 @@ export function renderSwmpHtml(swmp: Swmp, lookups?: SwmpRenderLookups, options?
   for (const p of (swmp.waste_stream_plans ?? []) as PlanRow[]) {
     if (p?.category) plansByCategory.set(p.category, p);
   }
-  const streams = (swmp.waste_streams ?? []).map((r) => r.stream);
+  // Canonical stream names: accept waste_streams as string[] (inputs) or { stream: string }[] (SwmpSchema)
+  const rawStreams = swmp.waste_streams ?? [];
+  let streams: string[] = Array.isArray(rawStreams)
+    ? rawStreams.map((r) => (typeof r === "string" ? r : (r && typeof r === "object" && "stream" in r ? (r as { stream: string }).stream : ""))).filter(Boolean)
+    : [];
+  if (streams.length === 0 && (swmp.waste_stream_plans ?? []).length > 0) {
+    streams = (swmp.waste_stream_plans as PlanRow[]).map((p) => p?.category).filter(Boolean) as string[];
+  }
   const getPlan = (stream: string): PlanRow =>
     plansByCategory.get(stream) ?? { category: stream };
 
@@ -126,7 +133,7 @@ export function renderSwmpHtml(swmp: Swmp, lookups?: SwmpRenderLookups, options?
   };
   const fmtTonnes = (n: number) => (n > 0 ? n.toFixed(3) : "—");
   const outcomesStr = (p: PlanRow) =>
-    (p.intended_outcomes ?? p.outcomes ?? []).join(", ") || "—";
+    (p.intended_outcomes ?? p.outcomes ?? [])[0] ?? "—";
 
   // Summary: partner name from lookup or legacy partner text
   const partnerDisplay = (p: PlanRow) => {
@@ -169,7 +176,7 @@ export function renderSwmpHtml(swmp: Swmp, lookups?: SwmpRenderLookups, options?
     unit: p.unit ?? null,
     density_kg_m3: p.density_kg_m3 ?? null,
     thickness_m: p.thickness_m ?? null,
-    intended_outcomes: p.intended_outcomes ?? p.outcomes ?? [],
+    intended_outcomes: (p.intended_outcomes ?? p.outcomes ?? [])[0] != null ? [(p.intended_outcomes ?? p.outcomes ?? [])[0]] : [],
     manual_qty_tonnes: p.manual_qty_tonnes ?? undefined,
     forecast_qty_tonnes: p.forecast_qty != null && p.forecast_qty >= 0 ? p.forecast_qty : undefined,
   }));
