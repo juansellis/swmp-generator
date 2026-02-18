@@ -488,10 +488,6 @@ export function renderSwmpHtml(swmp: Swmp, lookups?: SwmpRenderLookups, options?
       <h2>On-site controls</h2>
       <div class="grid2">
         <div>
-          <div><strong>Bin setup</strong></div>
-          ${list(swmp.on_site_controls.bin_setup)}
-        </div>
-        <div>
           <div><strong>Signage & storage</strong></div>
           ${list(swmp.on_site_controls.signage_and_storage)}
         </div>

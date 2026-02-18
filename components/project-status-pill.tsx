@@ -15,7 +15,7 @@ const PILL_STYLES: Record<ProjectStatusState, string> = {
 
 export interface ProjectStatusPillProps {
   status: ProjectStatusData;
-  /** Which phase to show (inputs | forecasting | outputs). Default: show single "Health" derived from all. */
+  /** Which phase to show (inputs | forecasting | report). Default: show single "Health" derived from all. */
   phase?: "inputs" | "forecasting" | "outputs";
   className?: string;
 }

@@ -22,10 +22,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { MoreHorizontal, RefreshCw } from "lucide-react";
+import { MoreHorizontal } from "lucide-react";
 import { INTENDED_OUTCOME_OPTIONS } from "@/lib/swmp/model";
 import { isRecommendationResolved } from "@/app/projects/[id]/swmp/recommendation-helpers";
-import { CompareFacilitiesModal } from "@/components/CompareFacilitiesModal";
 
 export type OptimiserStreamRecommendedFacility = {
   facility_id: string;
@@ -323,8 +322,6 @@ export function StreamPlanningCard({
   const top3 = nearest.slice(0, 3);
   const recommendedFacility = optimiserStream?.recommended_facility ?? null;
   const hasPartner = !!(plan.partner_id?.trim());
-  const [suggestedOpen, setSuggestedOpen] = React.useState(false);
-  const [compareModalOpen, setCompareModalOpen] = React.useState(false);
   const [recsOpen, setRecsOpen] = React.useState(false);
   const [handlingUpdating, setHandlingUpdating] = React.useState(false);
   const [outcomeUpdating, setOutcomeUpdating] = React.useState(false);
@@ -351,10 +348,10 @@ export function StreamPlanningCard({
     return ["Recycle"];
   };
 
-  const handleOutcomeChange = async (outcomes: string[]) => {
+  const handleOutcomeChange = async (value: string) => {
     setOutcomeUpdating(true);
     try {
-      await onPlanPatch(plan.stream_name, { intended_outcomes: outcomes });
+      await onPlanPatch(plan.stream_name, { intended_outcomes: [value] });
       onRefetch();
     } finally {
       setOutcomeUpdating(false);
@@ -538,108 +535,37 @@ export function StreamPlanningCard({
         </div>
         <Select
           value={outcomeToOptions()[0] ?? "Recycle"}
-          onValueChange={(v) => handleOutcomeChange([v])}
+          onValueChange={(v) => handleOutcomeChange(v)}
           disabled={outcomeUpdating}
         >
-          <SelectTrigger className="w-[120px] h-8 text-xs">
-            <SelectValue placeholder="Outcome" />
+          <SelectTrigger className="w-[140px] h-8 text-xs" title="Disposal method (choose one)">
+            <SelectValue placeholder="Disposal method" />
           </SelectTrigger>
           <SelectContent>
-            {INTENDED_OUTCOME_OPTIONS.filter((o) => ["Reuse", "Recycle", "Recover", "Landfill"].includes(o)).map(
-              (opt) => (
-                <SelectItem key={opt} value={opt}>
-                  {opt}
-                </SelectItem>
-              )
-            )}
+            {INTENDED_OUTCOME_OPTIONS.map((opt) => (
+              <SelectItem key={opt} value={opt}>
+                {opt}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
-        <div className="ml-auto">
-          {hasDestination ? (
-            <>
-              <Button variant="outline" size="sm" onClick={() => setCompareModalOpen(true)}>
-                Compare facilities
-              </Button>
-              <CompareFacilitiesModal
-                open={compareModalOpen}
-                onOpenChange={setCompareModalOpen}
-                streamName={plan.stream_name}
-                projectId={projectId}
-                defaultPartnerId={plan.partner_id}
-                onSelectFacility={(facilityId) => onApplyFacility(plan.stream_name, facilityId)}
-                applying={applyFacilityStream === plan.stream_name}
-                isSuperAdmin={isSuperAdmin}
-              />
-            </>
-          ) : (
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          {!hasDestination && top3.length > 0 && (
             <Button
               size="sm"
-              disabled={!top3.length || applyFacilityStream !== null}
+              disabled={applyFacilityStream !== null}
               onClick={() => top3[0] && onApplyFacility(plan.stream_name, top3[0].facility_id)}
             >
-              {applyFacilityStream === plan.stream_name ? "Applying…" : "Apply nearest facility"}
+              {applyFacilityStream === plan.stream_name ? "Applying…" : "Apply nearest"}
             </Button>
           )}
+          <Button variant="outline" size="sm" asChild>
+            <Link href={`/projects/${projectId}/optimiser`}>
+              Optimise facilities
+            </Link>
+          </Button>
         </div>
       </div>
-
-      {/* Collapsible: Suggested facilities */}
-      <details
-        className="mt-3 border-t border-border pt-3"
-        open={suggestedOpen}
-        onToggle={(e) => setSuggestedOpen((e.target as HTMLDetailsElement).open)}
-      >
-        <summary className="cursor-pointer text-sm font-medium text-muted-foreground hover:text-foreground list-none [&::-webkit-details-marker]:hidden">
-          Suggested facilities
-        </summary>
-        <div className="mt-2 space-y-2">
-          {distancesCached === 0 ? (
-            <div className="rounded-lg border border-amber-200 bg-amber-50/50 dark:bg-amber-950/20 p-3 text-sm">
-              <p className="text-amber-800 dark:text-amber-200 mb-2">Compute distances to see suggestions.</p>
-              <Button variant="outline" size="sm" onClick={() => onComputeDistances?.() ?? onRefetch()}>
-                <RefreshCw className="size-4 mr-1" />
-                Compute distances
-              </Button>
-            </div>
-          ) : top3.length === 0 ? (
-            <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
-              <p className="mb-2">No facilities with cached distances accept this stream.</p>
-              {isSuperAdmin && (
-                <Link href="/admin/facilities" className="text-primary text-xs font-medium hover:underline">
-                  Add facility that accepts this stream
-                </Link>
-              )}
-            </div>
-          ) : (
-            <ul className="space-y-2">
-              {top3.map((n, i) => (
-                <li
-                  key={n.facility_id}
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/20 px-3 py-2"
-                >
-                  <div>
-                    <p className="font-medium text-sm">{n.facility_name}</p>
-                    <p className="text-xs text-muted-foreground tabular-nums">
-                      {n.distance_km} km · {Math.round(n.duration_min)} min
-                      {i === 0 && (
-                        <Badge variant="secondary" className="ml-1 text-[10px]">Closest</Badge>
-                      )}
-                    </p>
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={applyFacilityStream !== null || n.facility_id === plan.assigned_facility_id}
-                    onClick={() => onApplyFacility(plan.stream_name, n.facility_id)}
-                  >
-                    {applyFacilityStream === plan.stream_name ? "Applying…" : "Apply"}
-                  </Button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </details>
 
       {/* Collapsible: Recommendations */}
       {streamRecommendations.length > 0 && (

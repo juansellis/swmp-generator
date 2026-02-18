@@ -1,11 +1,8 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { normalizeSwmpInputs, SWMP_INPUTS_JSON_COLUMN } from "@/lib/swmp/schema";
-import { INTENDED_OUTCOME_OPTIONS } from "@/lib/swmp/model";
 
-const INTENDED_OUTCOME_SET = new Set<string>(INTENDED_OUTCOME_OPTIONS);
-
-type Params = { params: Promise<{ id: string; streamId: string }> };
+type Params = { params: Promise<{ id: string }> };
 
 async function requireProjectAccess(projectId: string) {
   const supabase = await createClient();
@@ -29,46 +26,49 @@ async function requireProjectAccess(projectId: string) {
   return { supabase };
 }
 
-/**
- * PATCH /api/projects/:projectId/streams/:streamId/plan
- * Body: { handling_mode?: "mixed" | "separated"; intended_outcomes?: string[] }
- * Updates the stream plan's handling_mode and/or intended_outcomes in the latest swmp_inputs.
- * Same persistence pattern as the facility route (read latest, patch one plan, write back).
- */
-export async function PATCH(req: Request, { params }: Params) {
-  const { id: projectId, streamId: encodedStreamId } = await params;
-  const streamCategory = decodeURIComponent(encodedStreamId ?? "");
-  if (!streamCategory) {
-    return NextResponse.json({ error: "Missing stream id" }, { status: 400 });
-  }
+type Assignment = { stream_name: string; facility_id: string };
 
+/**
+ * POST /api/projects/:id/facility-optimiser/apply
+ * Body: { assignments: { stream_name: string; facility_id: string }[] }
+ * Applies stream → facility assignments to the latest swmp_inputs (same persistence as set_facility).
+ * Does not alter autosave or other save flows.
+ */
+export async function POST(req: Request, { params }: Params) {
+  const { id: projectId } = await params;
   const access = await requireProjectAccess(projectId);
   if (access.error) return access.error;
   const { supabase } = access;
 
-  let body: { handling_mode?: "mixed" | "separated"; intended_outcomes?: string[] } = {};
+  let body: { assignments?: Assignment[] } = {};
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
-
-  const handling_mode =
-    body.handling_mode === "separated" || body.handling_mode === "mixed"
-      ? body.handling_mode
-      : undefined;
-  const rawOutcomes = body.intended_outcomes;
-  const validOutcomes = Array.isArray(rawOutcomes)
-    ? (rawOutcomes as string[])
-        .map((o) => String(o ?? "").trim())
-        .filter((o) => INTENDED_OUTCOME_SET.has(o))
-    : [];
-  const intended_outcomes =
-    validOutcomes.length > 0 ? [validOutcomes[0]] : undefined;
-
-  if (handling_mode === undefined && intended_outcomes === undefined) {
-    return NextResponse.json({ error: "Provide handling_mode and/or intended_outcomes" }, { status: 400 });
+  const raw = body.assignments;
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return NextResponse.json({ error: "Provide non-empty assignments array" }, { status: 400 });
   }
+  const assignments = raw
+    .map((a) => {
+      const sn = typeof a?.stream_name === "string" ? a.stream_name.trim() : "";
+      const fid = typeof a?.facility_id === "string" ? a.facility_id.trim() : "";
+      return sn && fid ? { stream_name: sn, facility_id: fid } : null;
+    })
+    .filter((a): a is Assignment => a != null);
+  if (assignments.length === 0) {
+    return NextResponse.json({ error: "No valid assignments" }, { status: 400 });
+  }
+
+  const facilityIds = [...new Set(assignments.map((a) => a.facility_id))];
+  const { data: facilityRows } = await supabase
+    .from("facilities")
+    .select("id, partner_id")
+    .in("id", facilityIds);
+  const partnerByFacilityId = new Map<string, string | null>(
+    (facilityRows ?? []).map((f: { id: string; partner_id: string | null }) => [f.id, f.partner_id ?? null])
+  );
 
   const { data: row, error: fetchErr } = await supabase
     .from("swmp_inputs")
@@ -92,18 +92,17 @@ export async function PATCH(req: Request, { params }: Params) {
     return NextResponse.json({ error: "No project inputs found" }, { status: 404 });
   }
 
+  const assignmentByStream = new Map(assignments.map((a) => [a.stream_name, a]));
   const plans = inputs.waste_stream_plans ?? [];
-  const planIndex = plans.findIndex((p) => (p.category ?? "").trim() === streamCategory);
-  if (planIndex === -1) {
-    return NextResponse.json({ error: "Stream plan not found" }, { status: 404 });
-  }
-
-  const updatedPlans = plans.map((p, i) => {
-    if (i !== planIndex) return p;
+  const updatedPlans = plans.map((p) => {
+    const a = assignmentByStream.get((p.category ?? "").trim());
+    if (!a) return p;
+    const partnerId = partnerByFacilityId.get(a.facility_id) ?? p.partner_id ?? null;
     return {
       ...p,
-      ...(handling_mode !== undefined && { handling_mode }),
-      ...(intended_outcomes !== undefined && { intended_outcomes }),
+      facility_id: a.facility_id,
+      destination_mode: "facility" as const,
+      partner_id: partnerId,
     };
   });
   const nextInputs = { ...inputs, waste_stream_plans: updatedPlans };
@@ -126,5 +125,5 @@ export async function PATCH(req: Request, { params }: Params) {
     }
   }
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, applied: assignments.length });
 }

@@ -6,9 +6,9 @@ import { useProjectContext } from "@/app/projects/[id]/project-context";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-export type OutputsSection = "overview" | "strategy" | "streams" | "narrative" | "appendix";
+export type ReportSection = "overview" | "strategy" | "streams" | "narrative" | "appendix";
 
-const SECTIONS: { key: OutputsSection; label: string }[] = [
+const SECTIONS: { key: ReportSection; label: string }[] = [
   { key: "overview", label: "Overview" },
   { key: "strategy", label: "Strategy" },
   { key: "streams", label: "Waste Streams" },
@@ -16,12 +16,12 @@ const SECTIONS: { key: OutputsSection; label: string }[] = [
   { key: "appendix", label: "Appendix" },
 ];
 
-export function OutputsSectionHeader({
+export function ReportSectionHeader({
   currentSection,
   exportMode,
   onExportClick,
 }: {
-  currentSection: OutputsSection;
+  currentSection: ReportSection;
   exportMode: boolean;
   onExportClick: () => void;
 }) {
@@ -62,7 +62,7 @@ export function OutputsSectionHeader({
             {!exportMode && (
               <nav
                 className="flex items-center gap-0.5 rounded-lg bg-muted p-0.5"
-                aria-label="Outputs sections"
+                aria-label="Report sections"
               >
                 {SECTIONS.map(({ key, label }) => {
                   const isActive = currentSection === key;

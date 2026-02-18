@@ -5,8 +5,7 @@ import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ProjectStatusPills } from "@/components/project-status-pills";
-import { ProjectHealthBadge } from "@/components/project-status-pill";
+import { ProjectPhasePills } from "@/components/project-phase-pills";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -108,7 +107,7 @@ export function ProjectCard({
         </div>
 
         {address ? (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground min-w-0">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground min-w-0" title={address}>
             <MapPin className="size-3.5 shrink-0 text-muted-foreground/80" />
             <span className="truncate">{address}</span>
           </div>
@@ -131,7 +130,9 @@ export function ProjectCard({
           <div className="space-y-2">
             <div className="flex items-center justify-between text-xs">
               <span className="text-muted-foreground">Planning readiness</span>
-              <ProjectHealthBadge status={status} showScore={true} className="shrink-0 ml-2" />
+              <Badge variant={readiness === 100 ? "default" : "secondary"} className="shrink-0 ml-2 tabular-nums">
+                {readiness}%
+              </Badge>
             </div>
             <div
               className="h-2 w-full rounded-full bg-muted/80 overflow-hidden"
@@ -165,7 +166,7 @@ export function ProjectCard({
         )}
 
         <div className="pt-0.5">
-          <ProjectStatusPills status={status} showLabels={true} />
+          <ProjectPhasePills projectId={id} />
         </div>
       </div>
 

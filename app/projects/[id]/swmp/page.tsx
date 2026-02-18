@@ -12,8 +12,8 @@ import type {
   StreamPlanItem,
 } from "@/lib/planning/wasteStrategyBuilder";
 import type { PlanningChecklist } from "@/lib/planning/planningChecklist";
-import type { OutputsSection } from "./outputs-section-header";
-import { OutputsSectionHeader } from "./outputs-section-header";
+import type { ReportSection } from "./report-section-header";
+import { ReportSectionHeader } from "./report-section-header";
 
 import { AppShell } from "@/components/app-shell";
 import { PageHeader } from "@/components/page-header";
@@ -57,6 +57,7 @@ import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { PriorityChip, type PriorityLevel } from "@/components/ui/priority-chip";
 import { DecisionChip, type DecisionChipState } from "@/components/ui/decision-chip";
+import { useProjectContext } from "@/app/projects/[id]/project-context";
 import { StreamPlanningCards, type OptimiserStream, type StreamFilterState } from "./stream-planning-cards";
 import { isRecommendationResolved } from "./recommendation-helpers";
 import { CheckCircle2, Circle, AlertCircle, FileDown, ListChecks, RefreshCw } from "lucide-react";
@@ -65,7 +66,7 @@ const CARD_CLASS =
   "overflow-hidden rounded-xl border border-border shadow-sm print:shadow-none print:border print:bg-white";
 const SECTION_SPACE = "space-y-10";
 
-/** Catches render errors in a section so one broken section does not blank the whole Outputs page. */
+/** Catches render errors in a section so one broken section does not blank the whole Report page. */
 class SectionErrorBoundary extends React.Component<
   { sectionId: string; children: React.ReactNode },
   { hasError: boolean; error?: Error }
@@ -78,7 +79,7 @@ class SectionErrorBoundary extends React.Component<
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
     if (process.env.NODE_ENV === "development") {
-      console.error(`[Outputs section "${this.props.sectionId}"]`, error, info.componentStack);
+      console.error(`[Report section "${this.props.sectionId}"]`, error, info.componentStack);
     }
   }
 
@@ -255,8 +256,10 @@ export default function SwmpPage() {
   const searchParams = useSearchParams();
   const projectId = params?.id;
 
-  const section = (searchParams.get("section") ?? "overview") as OutputsSection;
+  const section = (searchParams.get("section") ?? "overview") as ReportSection;
   const exportMode = searchParams.get("export") === "1";
+  const projectContext = useProjectContext();
+  const projectName = projectContext?.project?.name ?? "Project";
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -753,7 +756,7 @@ export default function SwmpPage() {
       <AppShell>
         <div className={SECTION_SPACE}>
           <ProjectHeader />
-          <PageHeader title="Outputs" />
+          <PageHeader title="Report" />
           <Alert variant="destructive">
             <AlertTitle>Error</AlertTitle>
             <AlertDescription>{error}</AlertDescription>
@@ -763,27 +766,42 @@ export default function SwmpPage() {
     );
   }
 
-  const showSection = (s: OutputsSection) => exportMode || validSection === s;
+  const showSection = (s: ReportSection) => exportMode || validSection === s;
 
   return (
     <AppShell>
       <div className={SECTION_SPACE}>
         <div className="print:hidden space-y-2">
           <ProjectHeader />
-          <PageHeader
-            title="Outputs"
-            subtitle={
-              <span className="text-sm text-muted-foreground">
-                {swmp?.version != null && `Version ${swmp.version} • `}
-                {swmp?.created_at
-                  ? `Generated ${new Date(swmp.created_at).toLocaleString()}`
-                  : "SWMP document"}
-              </span>
-            }
-          />
+          <div className="max-w-5xl mx-auto px-4">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between flex-wrap">
+              <div>
+                <h1 className="text-xl font-semibold tracking-tight">Report</h1>
+                <p className="text-sm text-muted-foreground mt-0.5">
+                  {projectName}
+                  {swmp?.created_at
+                    ? ` • Last updated ${new Date(swmp.created_at).toLocaleDateString(undefined, { dateStyle: "medium" })}`
+                    : " • Not generated yet"}
+                </p>
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <Badge variant={swmp ? "default" : "secondary"} className="shrink-0">
+                  {swmp ? "Ready" : "Needs attention"}
+                </Badge>
+                {swmp && (
+                  <Button size="sm" asChild>
+                    <Link href={`/projects/${projectId}/swmp?export=1`}>
+                      <FileDown className="size-4 mr-2" />
+                      Download
+                    </Link>
+                  </Button>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
 
-        <OutputsSectionHeader
+        <ReportSectionHeader
           currentSection={validSection}
           exportMode={exportMode}
           onExportClick={() => setExportMode(!exportMode)}
@@ -1134,8 +1152,11 @@ export default function SwmpPage() {
                 <Card className={CARD_CLASS}>
                   <CardContent className="p-6">
                     <p className="text-sm text-muted-foreground">
-                      No waste stream data yet. Save your inputs and ensure waste streams are configured.
+                      Not provided yet. Save your inputs and configure waste streams in Inputs.
                     </p>
+                    <Button variant="outline" size="sm" className="mt-3" asChild>
+                      <Link href={`/projects/${projectId}/inputs#waste-streams`}>Go to Inputs</Link>
+                    </Button>
                   </CardContent>
                 </Card>
               ) : (
@@ -1304,7 +1325,7 @@ export default function SwmpPage() {
                         ? "Loading…"
                         : strategyError
                           ? strategyError
-                          : "No narrative generated yet. Save inputs and generate strategy to see summary and methodology."}
+                          : "Not provided yet. Save inputs and generate the report to see summary and methodology."}
                     </p>
                     {strategyError && projectId && (
                       <Button variant="outline" size="sm" className="mt-3" onClick={() => fetchWasteStrategy(projectId)}>

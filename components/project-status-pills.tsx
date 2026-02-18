@@ -17,7 +17,7 @@ const PILL_STYLES: Record<ProjectStatusState, string> = {
 export interface ProjectStatusPillsProps {
   status: ProjectStatusData;
   className?: string;
-  /** Show labels (Inputs, Forecasting, Outputs). Default true. */
+  /** Show labels (Inputs, Forecasting, Report). Default true. */
   showLabels?: boolean;
 }
 
@@ -32,7 +32,7 @@ export function ProjectStatusPills({
     <div
       className={cn("flex flex-wrap items-center gap-1.5", className)}
       role="status"
-      aria-label={`Project status: Inputs ${computed.inputs}, Forecasting ${computed.forecasting}, Outputs ${computed.outputs}`}
+      aria-label={`Project status: Inputs ${computed.inputs}, Forecasting ${computed.forecasting}, Report ${computed.outputs}`}
     >
       {(["inputs", "forecasting", "outputs"] as const).map((key) => (
         <span

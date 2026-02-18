@@ -212,7 +212,7 @@ export async function getPlanningChecklist(
     key: "strategy_generated",
     label: "Strategy generated",
     status: strategyGenerated ? "complete" : "incomplete",
-    detail: strategyGenerated ? "Waste strategy computed" : "View Outputs to generate strategy",
+    detail: strategyGenerated ? "Waste strategy computed" : "View Report to generate strategy",
     cta: !strategyGenerated ? { label: "Open Strategy", href: href(projectId, "/swmp", "?section=strategy") } : undefined,
   });
 

@@ -1,7 +1,9 @@
 "use client";
 
 import * as React from "react";
+import { Check, AlertCircle, Circle } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
 import { CompletionProgress } from "@/components/completion-progress";
 
 export type SectionAccent = "emerald" | "blue" | "amber" | "purple" | "zinc" | "green";
@@ -24,15 +26,27 @@ const ACCENT_BAR_CLASSES: Record<SectionAccent, string> = {
   green: "border-l-emerald-500/70",
 };
 
+export type StepStatusBadge = "complete" | "attention" | "not_started";
+
 export interface InputsSectionCardProps {
   id?: string;
   icon?: React.ReactNode;
   title: React.ReactNode;
   description?: React.ReactNode;
+  /** Short "Why this matters" line */
+  whyMatters?: React.ReactNode;
   accent?: SectionAccent;
   actions?: React.ReactNode;
   /** Optional completion for progress indicator (e.g. { completed: 3, total: 6 }) */
   completion?: { completed: number; total: number };
+  /** Plan Builder step status for badge (Complete / Needs attention / Not started) */
+  stepStatusBadge?: StepStatusBadge;
+  /** 2–4 bullets describing what "complete" means for this step */
+  checklist?: string[];
+  /** Footer CTA and helper text (e.g. Save & continue + "You can come back and edit later") */
+  footer?: React.ReactNode;
+  /** Optional guidance banner (Next Step / completion line) at top of body */
+  guidance?: React.ReactNode;
   children: React.ReactNode;
   className?: string;
   contentClassName?: string;
@@ -40,14 +54,41 @@ export interface InputsSectionCardProps {
   variant?: "default" | "grouped";
 }
 
+function StatusBadge({ status }: { status: StepStatusBadge }) {
+  if (status === "complete") {
+    return (
+      <Badge variant="secondary" className="gap-1 bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800">
+        <Check className="size-3" /> Complete
+      </Badge>
+    );
+  }
+  if (status === "attention") {
+    return (
+      <Badge variant="secondary" className="gap-1 bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-800">
+        <AlertCircle className="size-3" /> Needs attention
+      </Badge>
+    );
+  }
+  return (
+    <Badge variant="secondary" className="gap-1 text-muted-foreground">
+      <Circle className="size-3" /> Not started
+    </Badge>
+  );
+}
+
 export function InputsSectionCard({
   id,
   icon,
   title,
   description,
+  whyMatters,
   accent = "zinc",
   actions,
   completion,
+  stepStatusBadge,
+  checklist,
+  footer,
+  guidance,
   children,
   className,
   contentClassName,
@@ -60,20 +101,19 @@ export function InputsSectionCard({
     return (
       <section
         id={id}
-        className={cn(
-          "rounded-xl border border-border/50 overflow-hidden",
-          "border-l-4",
-          accentBarClass,
-          "bg-card shadow-sm",
-          className
-        )}
+      className={cn(
+        "rounded-xl border border-border/50 overflow-hidden border-l-4",
+        accentBarClass,
+        "bg-card transition-shadow hover:shadow-sm",
+        className
+      )}
       >
         <div className="bg-muted/40 px-6 py-4 border-b border-border/50">
           <div className="flex items-start justify-between gap-4">
-            <div className="flex items-start gap-3 min-w-0">
+            <div className="flex items-start gap-3 min-w-0 flex-1">
               {icon ? <span className={cn("shrink-0 mt-0.5", iconClass)}>{icon}</span> : null}
               <div className="space-y-1 min-w-0">
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <h2 className="text-lg font-semibold tracking-tight text-foreground">{title}</h2>
                   {completion ? (
                     <CompletionProgress
@@ -83,16 +123,35 @@ export function InputsSectionCard({
                       size="sm"
                     />
                   ) : null}
+                  {stepStatusBadge ? <StatusBadge status={stepStatusBadge} /> : null}
                 </div>
                 {description ? (
                   <p className="text-sm text-muted-foreground">{description}</p>
+                ) : null}
+                {whyMatters ? (
+                  <p className="text-xs text-muted-foreground/90">{whyMatters}</p>
+                ) : null}
+                {checklist && checklist.length > 0 ? (
+                  <ul className="text-xs text-muted-foreground list-disc list-inside mt-1.5 space-y-0.5">
+                    {checklist.map((item, i) => (
+                      <li key={i}>{item}</li>
+                    ))}
+                  </ul>
                 ) : null}
               </div>
             </div>
             {actions ? <div className="shrink-0">{actions}</div> : null}
           </div>
         </div>
-        <div className={cn("px-6 py-6", contentClassName)}>{children}</div>
+        <div className={cn("px-6 py-6", contentClassName)}>
+          {guidance ? <div className="mb-4">{guidance}</div> : null}
+          {children}
+          {footer ? (
+            <div className="mt-6 pt-4 border-t border-border/50 flex flex-wrap items-center gap-2">
+              {footer}
+            </div>
+          ) : null}
+        </div>
       </section>
     );
   }
@@ -101,7 +160,7 @@ export function InputsSectionCard({
     <section
       id={id}
       className={cn(
-        "rounded-2xl border border-border bg-card shadow-sm overflow-hidden",
+        "rounded-xl border border-border/50 bg-card overflow-hidden transition-shadow hover:shadow-sm",
         className
       )}
     >
@@ -114,7 +173,7 @@ export function InputsSectionCard({
               </span>
             ) : null}
             <div className="space-y-1 min-w-0">
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <h2 className="text-lg font-semibold tracking-tight">{title}</h2>
                 {completion ? (
                   <CompletionProgress
@@ -124,16 +183,33 @@ export function InputsSectionCard({
                     size="sm"
                   />
                 ) : null}
+                {stepStatusBadge ? <StatusBadge status={stepStatusBadge} /> : null}
               </div>
               {description ? (
                 <p className="text-sm text-muted-foreground">{description}</p>
+              ) : null}
+              {whyMatters ? (
+                <p className="text-xs text-muted-foreground/90">{whyMatters}</p>
+              ) : null}
+              {checklist && checklist.length > 0 ? (
+                <ul className="text-xs text-muted-foreground list-disc list-inside mt-1.5 space-y-0.5">
+                  {checklist.map((item, i) => (
+                    <li key={i}>{item}</li>
+                  ))}
+                </ul>
               ) : null}
             </div>
           </div>
           {actions ? <div className="shrink-0">{actions}</div> : null}
         </div>
       </div>
-      <div className={cn("px-6 py-6", contentClassName)}>{children}</div>
+      <div className={cn("px-6 py-6", contentClassName)}>
+        {guidance ? <div className="mb-4">{guidance}</div> : null}
+        {children}
+        {footer ? (
+          <div className="mt-6 pt-4 border-t border-border/50">{footer}</div>
+        ) : null}
+      </div>
     </section>
   );
 }

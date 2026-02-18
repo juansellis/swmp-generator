@@ -88,7 +88,7 @@ export function DeleteProjectDialog({
         <AlertDialogHeader>
           <AlertDialogTitle>Delete project?</AlertDialogTitle>
           <AlertDialogDescription>
-            This is permanent and will remove all associated planning data (inputs, forecast, outputs).
+            This is permanent and will remove all associated planning data (inputs, forecast, report).
             Type the project name below to confirm.
           </AlertDialogDescription>
         </AlertDialogHeader>

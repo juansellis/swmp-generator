@@ -1,5 +1,5 @@
 /**
- * Chart data for SWMP Outputs analytics.
+ * Chart data for SWMP Report analytics.
  * All values in tonnes (manual_qty_tonnes + forecast_qty).
  */
 

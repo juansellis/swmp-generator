@@ -12,11 +12,12 @@ import { ProjectHeader } from "@/components/project-header";
 import { InputsPageHeader } from "@/components/inputs/inputs-page-header";
 import { ProjectSummaryStrip } from "@/components/inputs/project-summary-strip";
 import { StreamRow } from "@/components/inputs/stream-row";
-import { MaterialRow } from "@/components/inputs/material-row";
+import { WasteStreamSelector } from "@/components/inputs/waste-stream-selector";
 import { Notice } from "@/components/notice";
-import { InputsSectionCard } from "@/components/inputs/section-card";
+import { InputsSectionCard, type StepStatusBadge } from "@/components/inputs/section-card";
+import { GuidanceBanner } from "@/components/inputs/guidance-banner";
 import { FieldGroup } from "@/components/inputs/field-group";
-import { InputsSidebarNav } from "@/components/inputs/inputs-sidebar-nav";
+import { BuilderHeader } from "@/components/inputs/builder-header";
 import { TextareaFieldWrapper } from "@/components/inputs/textarea-field-wrapper";
 import { SelectableOptionCard } from "@/components/inputs/selectable-option-card";
 import { RoleCard } from "@/components/inputs/role-card";
@@ -51,6 +52,7 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 import { AddressPicker, type AddressPickerValue } from "@/components/address-picker";
 import { AddressAutocomplete } from "@/components/address-autocomplete";
 import {
@@ -324,6 +326,15 @@ import type { Partner } from "@/lib/partners/types";
 import type { Facility } from "@/lib/facilities/types";
 import { fetchProjectStatusData } from "@/lib/projectStatus";
 import type { ProjectStatusData } from "@/lib/projectStatus";
+import { getTemplatePack, applyTemplateDefaults } from "@/lib/swmpTemplates";
+import {
+  computeBuilderProgress,
+  countCompleteSteps,
+  STEP_SECTION_IDS,
+  type BuilderProgressInput,
+  type BuilderStepId,
+} from "@/lib/swmpBuilder";
+import { BuilderProgressRail } from "@/components/inputs/builder-progress-rail";
 import { ProjectStatusPills } from "@/components/project-status-pills";
 import { StickyActionBar } from "@/components/sticky-action-bar";
 import { SmartHint } from "@/components/smart-hint";
@@ -678,6 +689,10 @@ export default function ProjectInputsPage() {
   const [saveLoading, setSaveLoading] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
+  /** After "Apply recommended content", show which template was applied (for confirmation banner). */
+  const [appliedTemplateLabel, setAppliedTemplateLabel] = useState<string | null>(null);
+  /** Preserve scroll position across autosave so changing facility/destination doesn’t jump to top. */
+  const scrollPositionBeforeSaveRef = useRef<number | null>(null);
 
   const hazards = useMemo(() => {
     return {
@@ -847,30 +862,46 @@ export default function ProjectInputsPage() {
         }
         lastHydratedProjectIdRef.current = projectId ?? null;
         const defaults = defaultSwmpInputs(projectId ?? undefined);
-        setSortingLevel(defaults.sorting_level);
-        setTargetDiversion(defaults.target_diversion);
-        setSelectedConstraints(defaults.constraints);
-        setSelectedWasteStreams(getWasteStreamsForProjectType(project.project_type ?? "") || defaults.waste_streams);
-        setStreamPlans(defaults.waste_stream_plans);
-        setHazAsbestos(defaults.hazards.asbestos);
-        setHazLeadPaint(defaults.hazards.lead_paint);
-        setHazContaminatedSoil(defaults.hazards.contaminated_soil);
-        setWasteContractor(defaults.logistics.waste_contractor ?? "");
-        setBinPreference(defaults.logistics.bin_preference);
-        setReportingCadence(defaults.logistics.reporting_cadence);
-        setMonitoringMethods(defaults.monitoring.methods);
-        setUsesSoftware(defaults.monitoring.uses_software);
-        setSoftwareName(defaults.monitoring.software_name ?? "");
-        setDocketsDescription(defaults.monitoring.dockets_description);
-        setSiteControls(defaults.site_controls);
-        setNotes(defaults.notes ?? "");
-        setAdditionalResponsibilities(defaults.additional_responsibilities);
-        setResponsibilities(
-          defaults.responsibilities.map((d, i) => ({
+        const streams = getWasteStreamsForProjectType(project.project_type ?? "") || defaults.waste_streams;
+        const basePlan = defaults.waste_stream_plans[0];
+        const waste_stream_plans = streams.map((category) => ({ ...basePlan, category }));
+        const currentInputs = {
+          ...defaults,
+          waste_streams: streams,
+          waste_stream_plans,
+          responsibilities: defaults.responsibilities.map((d, i) => ({
             ...d,
             party: i === 0 ? (project.swmp_owner ?? d.party) : i === 1 ? (project.main_contractor ?? d.party) : d.party,
-          }))
-        );
+          })),
+        };
+        const template = getTemplatePack(project.project_type ?? "");
+        const merged = template
+          ? applyTemplateDefaults({ template, currentInputs })
+          : currentInputs;
+        const mergedResp = merged.responsibilities.map((r, i) => ({
+          ...r,
+          party: i === 0 ? (project.swmp_owner ?? r.party) : i === 1 ? (project.main_contractor ?? r.party) : r.party,
+        }));
+        setSortingLevel(merged.sorting_level);
+        setTargetDiversion(merged.target_diversion);
+        setSelectedConstraints(merged.constraints);
+        setSelectedWasteStreams(merged.waste_streams);
+        setStreamPlans(merged.waste_stream_plans);
+        setHazAsbestos(merged.hazards.asbestos);
+        setHazLeadPaint(merged.hazards.lead_paint);
+        setHazContaminatedSoil(merged.hazards.contaminated_soil);
+        setWasteContractor(merged.logistics.waste_contractor ?? "");
+        setBinPreference(merged.logistics.bin_preference);
+        setReportingCadence(merged.logistics.reporting_cadence);
+        setMonitoringMethods(merged.monitoring.methods);
+        setUsesSoftware(merged.monitoring.uses_software);
+        setSoftwareName(merged.monitoring.software_name ?? "");
+        setDocketsDescription(merged.monitoring.dockets_description);
+        setSiteControls(merged.site_controls);
+        setNotes(merged.notes ?? "");
+        setAdditionalResponsibilities(merged.additional_responsibilities);
+        setResponsibilities(mergedResp);
+        if (template) setAppliedTemplateLabel(template.displayLabel);
       }
   
       setLoading(false);
@@ -913,6 +944,215 @@ export default function ProjectInputsPage() {
 
   const updatePlan = useCallback((stream: string, patch: Partial<WasteStreamPlan>) => {
     setStreamPlans((prev) => prev.map((p) => (p.category === stream ? { ...p, ...patch } : p)));
+  }, []);
+
+  /** Apply template defaults for current project type. Only fills empty fields; never overwrites existing content. */
+  const applyRecommendedContent = useCallback(
+    (projectTypeOverride?: string) => {
+      const effectiveType = (projectTypeOverride ?? effectiveProjectType ?? "").trim();
+      const template = getTemplatePack(effectiveType);
+      if (!template) return;
+
+      const defaults = defaultSwmpInputs(projectId ?? undefined);
+      const currentInputs = {
+        ...defaults,
+        sorting_level: sortingLevel,
+        target_diversion: Math.min(100, Math.max(0, Math.round(Number(targetDiversion)) || 0)),
+        constraints: selectedConstraints,
+        waste_streams: selectedWasteStreams,
+        waste_stream_plans: streamPlans.map((p) => ({
+          ...p,
+          manual_qty_tonnes: planManualQtyToTonnes(p, p.category) ?? null,
+        })),
+        responsibilities: responsibilities.map((r) => ({
+          role: r.role.trim() || "Role",
+          party: r.party.trim() || "—",
+          responsibilities: r.responsibilities?.filter(Boolean) ?? [],
+        })),
+        additional_responsibilities: additionalResponsibilities,
+        logistics: {
+          waste_contractor: null,
+          bin_preference: binPreference,
+          reporting_cadence: reportingCadence,
+        },
+        monitoring: {
+          methods: monitoringMethods,
+          uses_software: usesSoftware,
+          software_name: softwareName || null,
+          dockets_description: docketsDescription,
+        },
+        site_controls: siteControls,
+        notes: notes.trim() || null,
+      };
+      const merged = applyTemplateDefaults({ template, currentInputs });
+
+      setStreamPlans(merged.waste_stream_plans);
+      setMonitoringMethods(merged.monitoring.methods);
+      setUsesSoftware(merged.monitoring.uses_software);
+      setSoftwareName(merged.monitoring.software_name ?? "");
+      setDocketsDescription(merged.monitoring.dockets_description);
+      setSiteControls(merged.site_controls);
+      setResponsibilities(merged.responsibilities);
+      setNotes(merged.notes ?? "");
+      setAppliedTemplateLabel(template.displayLabel);
+      toast.success("Suggested SWMP content applied based on project type");
+    },
+    [
+      projectId,
+      effectiveProjectType,
+      sortingLevel,
+      targetDiversion,
+      selectedConstraints,
+      selectedWasteStreams,
+      streamPlans,
+      responsibilities,
+      additionalResponsibilities,
+      binPreference,
+      reportingCadence,
+      monitoringMethods,
+      usesSoftware,
+      softwareName,
+      docketsDescription,
+      siteControls,
+      notes,
+    ]
+  );
+
+  // Guided builder progress (completion engine for Plan Builder)
+  const builderProgressInput: BuilderProgressInput = useMemo(
+    () => {
+      const hasDest = (p: {
+        facility_id?: string | null;
+        destination_mode?: string | null;
+        custom_destination_address?: string | null;
+        custom_destination_place_id?: string | null;
+        destination_override?: string | null;
+      }) =>
+        (p.facility_id != null && String(p.facility_id).trim() !== "") ||
+        (p.destination_mode === "custom" &&
+          ((p.custom_destination_address ?? "").trim() !== "" ||
+            (p.custom_destination_place_id ?? "").trim() !== "")) ||
+        (p.destination_override != null && String(p.destination_override).trim() !== "");
+      const allStreamsHaveDestination =
+        selectedWasteStreams.length > 0 &&
+        selectedWasteStreams.every((stream) => {
+          const plan = streamPlans.find((p) => p.category === stream);
+          return plan && hasDest(plan);
+        });
+      const allStreamsHaveDisposal =
+        selectedWasteStreams.length > 0 &&
+        selectedWasteStreams.every((stream) => {
+          const plan = streamPlans.find((p) => p.category === stream);
+          return plan && (plan.intended_outcomes?.length ?? 0) > 0;
+        });
+      const hasPlannedTonnes = streamPlans.some(
+        (p) => (p.manual_qty_tonnes ?? 0) + (p.forecast_qty ?? 0) > 0
+      );
+      return {
+        projectName: project?.name ?? (projectContext?.project as { name?: string } | null)?.name ?? null,
+        siteAddress: siteAddress?.trim() || null,
+        siteAddressValidated: !!(siteAddressValidated?.place_id),
+        region: region?.trim() || null,
+        projectType: effectiveProjectType || null,
+        startDate: startDate?.trim() || null,
+        wasteStreamsCount: selectedWasteStreams.length,
+        hasPlannedTonnes,
+        allStreamsHaveDestination,
+        allStreamsHaveDisposal,
+        hasFacilityOrDestination: streamPlans.some(hasDest),
+        primaryWasteContractorPartnerId: primaryWasteContractorPartnerId ?? null,
+        constraints: selectedConstraints,
+        siteControls,
+        monitoring: {
+          methods: monitoringMethods,
+          dockets_description: docketsDescription,
+          reportingCadence: reportingCadence ?? null,
+          uses_software: usesSoftware,
+        },
+        hasNotesOrResponsibilities:
+          (notes ?? "").trim() !== "" ||
+          responsibilities.some(
+            (r) =>
+              (r.role ?? "").trim() !== "" ||
+              (r.party ?? "").trim() !== "" ||
+              (r.responsibilities?.length ?? 0) > 0
+          ),
+      };
+    },
+    [
+      project?.name,
+      projectContext?.project,
+      siteAddress,
+      siteAddressValidated?.place_id,
+      region,
+      effectiveProjectType,
+      startDate,
+      selectedWasteStreams,
+      streamPlans,
+      primaryWasteContractorPartnerId,
+      selectedConstraints,
+      siteControls,
+      monitoringMethods,
+      docketsDescription,
+      reportingCadence,
+      usesSoftware,
+      notes,
+      responsibilities,
+    ]
+  );
+  const builderProgress = useMemo(
+    () => computeBuilderProgress(builderProgressInput),
+    [builderProgressInput]
+  );
+  const builderCompleteCount = countCompleteSteps(builderProgress);
+
+  const getStepStatusBadge = useCallback(
+    (sectionId: string): StepStatusBadge | undefined => {
+      const stepId = (Object.entries(STEP_SECTION_IDS) as [BuilderStepId, string][]).find(
+        ([, id]) => id === sectionId
+      )?.[0];
+      if (!stepId) return undefined;
+      const step = builderProgress.find((p) => p.stepId === stepId);
+      if (!step) return undefined;
+      return step.status === "complete"
+        ? "complete"
+        : step.status === "recommendedNext"
+          ? "attention"
+          : "not_started";
+    },
+    [builderProgress]
+  );
+
+  const wasteStreamsGuidance = useMemo(() => {
+    const count = builderProgressInput.wasteStreamsCount ?? 0;
+    const hasTonnes = builderProgressInput.hasPlannedTonnes === true;
+    const hasDest = builderProgressInput.allStreamsHaveDestination === true;
+    const hasDisposal = builderProgressInput.allStreamsHaveDisposal === true;
+    if (count === 0) return { nextStepLabel: "Add at least one waste stream", ctaLabel: "Add waste stream" };
+    if (!hasTonnes) return { nextStepLabel: "Enter planned tonnes for at least one stream", ctaLabel: "Set tonnes" };
+    if (!hasDisposal) return { nextStepLabel: "Set disposal method for each stream", ctaLabel: "Set disposal" };
+    if (!hasDest) return { nextStepLabel: "Set destination/facility for each stream", ctaLabel: "Set destination" };
+    return { nextStepLabel: "", ctaLabel: "" };
+  }, [builderProgressInput]);
+
+  const scrollToNextSection = useCallback((currentSectionId: string) => {
+    const sectionOrder = [
+      "project-overview",
+      "waste-streams",
+      "primary-waste-contractor",
+      "resource-inputs",
+      "monitoring-site-controls",
+      "compliance-notes",
+    ];
+    const idx = sectionOrder.indexOf(currentSectionId);
+    const nextId = idx >= 0 && idx < sectionOrder.length - 1 ? sectionOrder[idx + 1] : null;
+    if (nextId) {
+      const el = document.getElementById(nextId);
+      if (el) {
+        const y = el.getBoundingClientRect().top + window.scrollY - 96;
+        window.scrollTo({ top: Math.max(0, y), behavior: "smooth" });
+      }
+    }
   }, []);
 
   // Optional: when destination is facility, facility_id is null, and exactly one facility for the effective partner accepts this stream, auto-select it (no overwrite of user-set facility).
@@ -1050,7 +1290,7 @@ export default function ProjectInputsPage() {
         ((plan?.destination_override ?? "").trim().length > 0) ||
         ((plan?.destination ?? "").trim().length > 0);
       const distanceProvided = plan?.distance_km != null && plan.distance_km >= 0;
-      if (!outcomesSet) list.push(`“${stream}”: intended outcomes not set.`);
+      if (!outcomesSet) list.push(`“${stream}”: Select a disposal method.`);
       if (!destinationSet) list.push(`“${stream}”: destination not set (select facility or enter custom).`);
       if (!distanceProvided) list.push(`“${stream}”: distance (km) not provided (0 is OK).`);
     }
@@ -1153,6 +1393,7 @@ export default function ProjectInputsPage() {
       return;
     }
 
+    scrollPositionBeforeSaveRef.current = window.scrollY;
     setSaveLoading(true);
 
     try {
@@ -1209,6 +1450,24 @@ export default function ProjectInputsPage() {
         return;
       }
 
+      // Persist Primary Waste Contractor on project row (source of truth is projects.primary_waste_contractor_partner_id)
+      const primaryPartnerId = toUuidOrNull(primaryWasteContractorPartnerId ?? null);
+      const { error: projectUpdateError } = await supabase
+        .from("projects")
+        .update({ primary_waste_contractor_partner_id: primaryPartnerId })
+        .eq("id", projectId);
+
+      if (projectUpdateError) {
+        setSaveError(projectUpdateError.message || "Inputs saved but Primary Waste Contractor could not be updated.");
+        return;
+      }
+
+      if (project && projectContext?.project?.id === projectId) {
+        const updatedProject = { ...project, primary_waste_contractor_partner_id: primaryPartnerId } as ProjectRow;
+        setProject(updatedProject);
+        projectContext.setProject(updatedProject);
+      }
+
       // Recompute distance for each stream plan that has a destination (facility or custom).
       const plansWithDestination = streamPlans.filter((p) => {
         if (p.destination_mode === "custom") {
@@ -1249,7 +1508,8 @@ export default function ProjectInputsPage() {
       const nextStatus = await fetchProjectStatusData(supabase, projectId);
       setProjectStatus(nextStatus);
       setLastSavedAt(new Date());
-      setSaveMessage("Inputs saved. Next: generate SWMP (we’ll add this button next).");
+      setSaveMessage("Inputs saved.");
+      toast.success("Saved");
     } finally {
       setSaveLoading(false);
     }
@@ -1262,6 +1522,21 @@ export default function ProjectInputsPage() {
       : saveMessage
         ? "saved"
         : "idle";
+
+  // Restore scroll position after autosave completes so the page doesn’t jump to top (e.g. when changing facility).
+  const prevSaveLoadingRef = useRef(saveLoading);
+  useEffect(() => {
+    if (prevSaveLoadingRef.current === true && saveLoading === false) {
+      const y = scrollPositionBeforeSaveRef.current;
+      scrollPositionBeforeSaveRef.current = null;
+      if (y !== null && Number.isFinite(y)) {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => window.scrollTo(0, y));
+        });
+      }
+    }
+    prevSaveLoadingRef.current = saveLoading;
+  }, [saveLoading]);
 
   if (loading) {
     return (
@@ -1337,18 +1612,91 @@ export default function ProjectInputsPage() {
 
         <div className="flex gap-8">
           <aside className="hidden lg:block w-52 shrink-0">
-            <InputsSidebarNav />
+            <BuilderProgressRail progress={builderProgress} />
           </aside>
           <main className="min-w-0 flex-1">
             <div className="max-w-6xl mx-auto space-y-8">
-              {/* Section A — Project Overview / Strategy */}
+              <BuilderHeader
+                progress={builderProgress}
+                completeCount={builderCompleteCount}
+                onApplyTemplate={applyRecommendedContent}
+                applyTemplateDisabled={saveLoading}
+                showApplyTemplate={!!(effectiveProjectType && getTemplatePack(effectiveProjectType))}
+              />
+              {appliedTemplateLabel && (
+                <div
+                  className="flex flex-wrap items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm dark:border-emerald-800 dark:bg-emerald-950/40"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <span className="font-medium text-emerald-800 dark:text-emerald-200">
+                    Applied defaults for: {appliedTemplateLabel}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 text-emerald-700 hover:text-emerald-900 dark:text-emerald-300 dark:hover:text-emerald-100"
+                    onClick={() => {
+                      const el = document.getElementById("waste-streams");
+                      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+                    }}
+                  >
+                    View changes
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="ml-auto h-7 text-emerald-600 dark:text-emerald-400"
+                    onClick={() => setAppliedTemplateLabel(null)}
+                    aria-label="Dismiss"
+                  >
+                    Dismiss
+                  </Button>
+                </div>
+              )}
+              {/* Step 1 — Project basics */}
               <InputsSectionCard
                 id="project-overview"
                 icon={<LayoutDashboard className="size-5" />}
-                title="Project Overview"
-                description="Complete required fields to enable Save inputs and Generate SWMP."
+                title="Project basics"
+                description="Site, region, project type, dates, and key contacts."
+                whyMatters="Required for compliant SWMP and reporting."
                 accent="emerald"
                 variant="grouped"
+                stepStatusBadge={getStepStatusBadge("project-overview")}
+                checklist={[
+                  "Project type and region selected",
+                  "Site address validated (choose from suggestions)",
+                  "Start date and client/contractor/SWMP owner filled",
+                ]}
+                guidance={
+                  <GuidanceBanner
+                    complete={getStepStatusBadge("project-overview") === "complete"}
+                    nextStepLabel="Fill required fields (address, region, type, dates, contacts)"
+                    helperText="Validated site address and key contacts are required for SWMP compliance."
+                    ctaLabel="Continue to next step"
+                    onCta={() => scrollToNextSection("project-overview")}
+                  />
+                }
+                footer={
+                  <>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        handleSaveInputs({ preventDefault: () => {} } as React.FormEvent);
+                        scrollToNextSection("project-overview");
+                      }}
+                      disabled={saveLoading || !requiredOk}
+                    >
+                      Save & continue
+                    </Button>
+                    <span className="text-xs text-muted-foreground">You can come back and edit later.</span>
+                  </>
+                }
                 completion={{
                   completed: [
                     siteAddress.trim(),
@@ -1420,6 +1768,7 @@ export default function ProjectInputsPage() {
                       onValueChange={(v) => {
                         setProjectType(v ?? "");
                         if (v !== "Other") setProjectTypeOther("");
+                        if (v && v !== "Other") applyRecommendedContent(v);
                       }}
                       disabled={saveLoading}
                     >
@@ -1478,7 +1827,7 @@ export default function ProjectInputsPage() {
           <AccordionItem value="report" className="border border-border/50 rounded-lg px-0 mb-2 overflow-hidden">
             <AccordionTrigger className="flex w-full items-center justify-between rounded-lg border border-border/50 bg-muted/40 px-4 py-3 hover:bg-muted/60 transition-colors [&>svg]:shrink-0">
               <span className="flex flex-col items-start text-left gap-0.5">
-                <span className="text-base font-bold">Report Customisation</span>
+                <span className="text-sm font-semibold">Report Customisation</span>
                 <span className="text-sm text-muted-foreground">
                   Report: {[reportTitle?.trim() && "title set", clientLogoUrl && "logo set"].filter(Boolean).join(" / ") || "not configured"}
                 </span>
@@ -1832,14 +2181,35 @@ export default function ProjectInputsPage() {
               </InputsSectionCard>
 
               <form onSubmit={handleSaveInputs} className="space-y-10">
-              {/* Section B — Primary Waste Contractor (Strategy) */}
+              {/* Step 3 — Facilities & logistics */}
               <InputsSectionCard
                 id="primary-waste-contractor"
                 icon={<Users className="size-5" />}
-                title="Primary Waste Contractor"
-                description="Select the main waste contractor and bin setup."
+                title="Facilities & logistics"
+                description="Primary waste contractor. Set destinations per stream in Waste Streams."
+                whyMatters="Enables facility recommendations and diversion tracking."
                 accent="blue"
                 variant="grouped"
+                stepStatusBadge={getStepStatusBadge("primary-waste-contractor")}
+                checklist={[
+                  "Primary waste contractor (partner) selected",
+                  "Each waste stream has a facility or custom destination (in Waste Streams)",
+                ]}
+                guidance={
+                  <GuidanceBanner
+                    complete={getStepStatusBadge("primary-waste-contractor") === "complete"}
+                    nextStepLabel="Choose a facility per stream or run the optimiser"
+                    helperText="Destinations are set per stream in Waste Streams; they enable diversion tracking."
+                    ctaLabel="Go to Waste Streams"
+                    onCta={() => {
+                      const el = document.getElementById("waste-streams");
+                      if (el) {
+                        const y = el.getBoundingClientRect().top + window.scrollY - 96;
+                        window.scrollTo({ top: Math.max(0, y), behavior: "smooth" });
+                      }
+                    }}
+                  />
+                }
               >
                 {selectedWasteStreams.length > 0 && (
                   <p className="text-sm text-muted-foreground mb-4">
@@ -1876,33 +2246,18 @@ export default function ProjectInputsPage() {
                       </p>
                     )}
                   </div>
-                  <div className="space-y-2">
-                    <Label>Bin setup</Label>
-                    <Select
-                      value={binPreference}
-                      onValueChange={(v) => setBinPreference(v as any)}
-                      disabled={saveLoading}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Recommend">Recommend for me</SelectItem>
-                        <SelectItem value="Manual">I will specify manually (later)</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
                 </FieldGroup>
               </InputsSectionCard>
 
-              {/* Site & Facilities */}
+              {/* Site & Facilities (part of Facilities & logistics) */}
               <InputsSectionCard
                 id="site-and-facilities"
                 icon={<Building2 className="size-5" />}
-                title="Site & Facilities"
-                description="Site constraints. Facilities are selected per stream in Waste Streams."
+                title="Site constraints"
+                description="Constraints that may affect waste handling. Facilities are selected per stream in Waste Streams."
                 accent="amber"
                 variant="grouped"
+                stepStatusBadge={getStepStatusBadge("primary-waste-contractor")}
               >
                 <FieldGroup
                   label="Site constraints"
@@ -1923,16 +2278,71 @@ export default function ProjectInputsPage() {
                 </FieldGroup>
               </InputsSectionCard>
 
-              {/* Section C — Waste Streams */}
+              {/* Step 2 — Waste streams */}
               <InputsSectionCard
                 id="waste-streams"
                 icon={<Recycle className="size-5" />}
-                title="Waste Streams"
-                description="Configure waste streams, diversion, and stream plans."
+                title="Waste streams"
+                description="Select streams, set quantities, disposal method, and destination per stream."
+                whyMatters="Core data for diversion calculations and the generated SWMP."
                 accent="green"
                 variant="grouped"
+                stepStatusBadge={getStepStatusBadge("waste-streams")}
+                checklist={[
+                  "At least one waste stream selected",
+                  "Planned tonnes entered for at least one stream",
+                  "Disposal method and destination set per stream",
+                ]}
+                guidance={
+                  <GuidanceBanner
+                    complete={getStepStatusBadge("waste-streams") === "complete"}
+                    nextStepLabel={wasteStreamsGuidance.nextStepLabel || undefined}
+                    helperText="Streams and quantities drive diversion calculations and the generated SWMP."
+                    ctaLabel={wasteStreamsGuidance.ctaLabel || "Go to waste streams"}
+                    onCta={() => {
+                      const el = document.getElementById(selectedWasteStreams.length > 0 ? "waste-stream-planning" : "waste-streams");
+                      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+                    }}
+                  />
+                }
+                footer={
+                  <>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        handleSaveInputs({ preventDefault: () => {} } as React.FormEvent);
+                        scrollToNextSection("waste-streams");
+                      }}
+                      disabled={saveLoading}
+                    >
+                      Save & continue
+                    </Button>
+                    <span className="text-xs text-muted-foreground">You can come back and edit later.</span>
+                  </>
+                }
                 completion={{
-                  completed: selectedWasteStreams.length,
+                  completed: (() => {
+                    if (selectedWasteStreams.length === 0) return 0;
+                    const hasDest = (p: WasteStreamPlan) =>
+                      (p.destination_mode === "custom" &&
+                        ((p.custom_destination_name ?? "").trim() !== "" ||
+                          (p.custom_destination_address ?? "").trim() !== "" ||
+                          (p.custom_destination_place_id ?? "").trim() !== "")) ||
+                      (p.facility_id != null && String(p.facility_id).trim() !== "");
+                    const complete = selectedWasteStreams.filter((stream) => {
+                      const plan = streamPlans.find((p) => p.category === stream);
+                      const hasTonnes = (plan?.manual_qty_tonnes ?? 0) + (plan?.forecast_qty ?? 0) > 0;
+                      return (
+                        plan &&
+                        (plan.intended_outcomes?.length ?? 0) > 0 &&
+                        hasDest(plan) &&
+                        hasTonnes
+                      );
+                    }).length;
+                    return complete;
+                  })(),
                   total: Math.max(selectedWasteStreams.length, 1),
                 }}
               >
@@ -1944,120 +2354,41 @@ export default function ProjectInputsPage() {
                 className="mb-4"
               />
             )}
-            <div>
-              <Label className="mb-3 block text-lg font-semibold">Waste Streams Anticipated</Label>
-
-              {selectedWasteStreams.length > 0 &&
-                effectiveProjectType &&
-                PROJECT_TYPE_DEFAULT_STREAMS[effectiveProjectType] != null && (
-                  <p className="text-sm text-muted-foreground mb-2">
-                    Template available — click Apply template to set default waste streams for this project type.
-                  </p>
-                )}
-
-              <div className="flex flex-wrap gap-2 items-center mb-4">
-                <Input
-                  value={wasteStreamSearch}
-                  onChange={(e) => setWasteStreamSearch(e.target.value)}
-                  placeholder="Search streams…"
-                  disabled={saveLoading}
-                  className="flex-1 min-w-[240px]"
-                />
-
-                {effectiveProjectType && PROJECT_TYPE_DEFAULT_STREAMS[effectiveProjectType] != null && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="default"
-                    disabled={saveLoading}
-                    onClick={() => {
-                      const templateStreams =
-                        getWasteStreamsForProjectType(effectiveProjectType);
-                      setSelectedWasteStreams(templateStreams);
-                      setStreamPlans(
-                        templateStreams.map((stream) => buildDefaultPlanForStream(stream))
-                      );
-                    }}
-                    className="transition-colors hover:bg-muted/80"
-                  >
-                    Apply template
-                  </Button>
-                )}
-
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="default"
-                  disabled={saveLoading}
-                  onClick={() => {
-                    setSelectedWasteStreams((prev) => {
-                      const set = new Set(prev);
-                      for (const s of COMMON_STREAM_SET) set.add(s);
-                      return Array.from(set);
-                    });
-                  }}
-                  className="transition-colors hover:bg-muted/80"
-                >
-                  Add common set
-                </Button>
-
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="default"
-                  disabled={saveLoading}
-                  onClick={() => setSelectedWasteStreams([])}
-                  className="transition-colors hover:bg-muted/80"
-                >
-                  Clear
-                </Button>
-              </div>
-
-              {selectedWasteStreams.length > 0 && (
-                <div className="flex flex-wrap gap-2 mb-4">
-                  {selectedWasteStreams.map((s) => (
-                    <Badge
-                      key={s}
-                      variant="secondary"
-                      className="flex items-center gap-2 px-3 py-1.5 bg-muted border border-border rounded-full"
-                    >
-                      <span>{s}</span>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-xs"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedWasteStreams((prev) => prev.filter((x) => x !== s));
-                        }}
-                        className="ml-1 h-5 w-5 rounded-full p-0"
-                        aria-label={`Remove ${s}`}
-                        title="Remove"
-                      >
-                        <XIcon className="size-3" />
-                      </Button>
-                    </Badge>
-                  ))}
-                </div>
+            <WasteStreamSelector
+              search={wasteStreamSearch}
+              onSearchChange={setWasteStreamSearch}
+              library={wasteStreamLibrary}
+              selected={selectedWasteStreams}
+              onAddStream={(stream) =>
+                setSelectedWasteStreams((prev) => (prev.includes(stream) ? prev : [...prev, stream]))
+              }
+              onRemoveStream={(stream) =>
+                setSelectedWasteStreams((prev) => prev.filter((x) => x !== stream))
+              }
+              onApplyTemplate={() => {
+                const templateStreams =
+                  getWasteStreamsForProjectType(effectiveProjectType ?? "");
+                setSelectedWasteStreams(templateStreams);
+                setStreamPlans(
+                  templateStreams.map((stream) => buildDefaultPlanForStream(stream))
+                );
+              }}
+              onAddCommonSet={() => {
+                setSelectedWasteStreams((prev) => {
+                  const set = new Set(prev);
+                  for (const s of COMMON_STREAM_SET) set.add(s);
+                  return Array.from(set);
+                });
+              }}
+              onContinueToPlanning={() => {
+                const el = document.getElementById("waste-stream-planning");
+                if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+              }}
+              hasTemplate={!!(
+                effectiveProjectType && PROJECT_TYPE_DEFAULT_STREAMS[effectiveProjectType] != null
               )}
-
-              <div className="grid gap-3 sm:grid-cols-2">
-                {wasteStreamLibrary.filter((w) =>
-                  w.toLowerCase().includes(wasteStreamSearch.trim().toLowerCase())
-                ).map((w) => (
-                  <div key={w} className="flex items-center gap-2">
-                    <Checkbox
-                      checked={selectedWasteStreams.includes(w)}
-                      onCheckedChange={() =>
-                        toggleInList(w, selectedWasteStreams, setSelectedWasteStreams)
-                      }
-                      disabled={saveLoading}
-                    />
-                    <Label className="font-normal">{w}</Label>
-                  </div>
-                ))}
-              </div>
-            </div>
+              disabled={saveLoading}
+            />
 
             <div className="mt-6 rounded-lg border bg-muted/30 p-4 space-y-3">
               <Label className="font-semibold block">Diversion summary</Label>
@@ -2095,17 +2426,16 @@ export default function ProjectInputsPage() {
               )}
             </div>
 
-            <div className="mt-6">
-              <div className="mb-3 flex items-center gap-2">
-                <Label className="block font-semibold">Waste stream plans (detailed)</Label>
-                {saveLoading && (
-                  <span className="text-xs text-muted-foreground" aria-live="polite">Saving…</span>
-                )}
-              </div>
-              <p className="text-sm text-muted-foreground mb-4">
-                One plan card per selected stream. Select Partner (company) and Facility (site), or choose Other and enter a custom destination.
-              </p>
+            <div className="mt-6 space-y-4">
+              {saveLoading && (
+                <span className="text-xs text-muted-foreground" aria-live="polite">Saving…</span>
+              )}
 
+              <div id="waste-stream-planning" className="scroll-mt-6">
+                <h3 className="text-sm font-semibold text-foreground mb-3 mt-6">
+                  Plan selected streams
+                </h3>
+              </div>
               {selectedWasteStreams.length > 1 && (
                 <div className="flex flex-wrap gap-2 items-center mb-4">
                   <Label className="text-sm">Copy from</Label>
@@ -2129,18 +2459,17 @@ export default function ProjectInputsPage() {
                     onClick={() => {
                       const src = streamPlans.find((p) => p.category === copyFromStream);
                       if (!src) return;
+                      const single = src.intended_outcomes?.length > 0 ? [src.intended_outcomes[0]] : ["Recycle"];
                       setStreamPlans((prev) =>
                         prev.map((p) => ({
                           ...p,
-                          intended_outcomes:
-                            src.intended_outcomes?.length > 0
-                              ? [...src.intended_outcomes]
-                              : ["Recycle"],
+                          intended_outcomes: single,
+                          hadMultipleOutcomes: false,
                         }))
                       );
                     }}
                   >
-                    Copy outcomes to all
+                    Copy disposal method to all
                   </Button>
 
                   <Button
@@ -2277,49 +2606,170 @@ export default function ProjectInputsPage() {
                 </div>
               ) : (
                 <>
-                <div className="rounded-lg border overflow-hidden mb-4">
+                <div className="rounded-md border border-border/50 overflow-hidden mb-4">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-border bg-muted/50">
                         <th className="text-left font-medium px-4 py-3">Stream</th>
-                        <th className="text-left font-medium px-4 py-3">Partner</th>
-                        <th className="text-left font-medium px-4 py-3">Facility / Destination</th>
-                        <th className="text-left font-medium px-4 py-3">Qty</th>
-                        <th className="w-24 px-4 py-3"></th>
+                        <th className="text-left font-medium px-4 py-3 w-28">Planned tonnes</th>
+                        <th className="text-left font-medium px-4 py-3 min-w-[140px]">Disposal method</th>
+                        <th className="text-left font-medium px-4 py-3 min-w-[160px]">Destination / facility</th>
+                        <th className="text-left font-medium px-4 py-3 w-28">Status</th>
+                        <th className="w-20 px-4 py-3"></th>
                       </tr>
                     </thead>
                     <tbody>
                       {selectedWasteStreams.map((stream) => {
                         const plan = streamPlans.find((p) => p.category === stream);
                         const effectivePartnerId = getEffectivePartnerId(plan ?? undefined, primaryWasteContractorPartnerId);
+                        const facilityList = effectivePartnerId ? (facilitiesByPartner[effectivePartnerId] ?? []) : [];
                         const partner = effectivePartnerId ? catalogPartners.find((p) => p.id === effectivePartnerId) : null;
-                        const facility = effectivePartnerId && plan?.facility_id ? facilitiesByPartner[effectivePartnerId]?.find((f) => f.id === plan.facility_id) : null;
-                        const dest =
+                        const facility = plan?.facility_id ? facilityList.find((f) => f.id === plan.facility_id) : null;
+                        const manualTonnesRaw = plan?.manual_qty_tonnes ?? (plan ? planManualQtyToTonnes(plan, stream) : null);
+                        const manualTonnesNum = manualTonnesRaw != null && Number.isFinite(manualTonnesRaw) ? Number(manualTonnesRaw) : null;
+                        const hasDest =
                           plan?.destination_mode === "custom"
-                            ? (plan?.custom_destination_name ?? plan?.custom_destination_address ?? "").trim() || "—"
-                            : facility
-                              ? (facility as { name?: string }).name ?? ""
-                              : "";
-                        const manualTonnes = plan?.manual_qty_tonnes ?? (plan ? planManualQtyToTonnes(plan, stream) : null) ?? 0;
-                        const forecastTonnes = plan?.forecast_qty != null && plan.forecast_qty >= 0 ? plan.forecast_qty : 0;
-                        const totalTonnes = manualTonnes + forecastTonnes;
-                        const qty = totalTonnes > 0 ? `${totalTonnes.toFixed(3)} tonne` : "—";
+                            ? ((plan?.custom_destination_name ?? plan?.custom_destination_address ?? "").trim() !== "" ||
+                                (plan?.custom_destination_place_id ?? "").trim() !== "")
+                            : plan?.facility_id != null && String(plan.facility_id).trim() !== "";
+                        const hasDisposal = (plan?.intended_outcomes?.length ?? 0) > 0;
+                        const streamComplete = hasDisposal && hasDest;
                         const expanded = expandedStreamPlans[stream] ?? false;
                         return (
                           <tr
                             key={stream}
                             className="border-b border-border hover:bg-muted/30"
                           >
-                            <td className="px-4 py-2 font-medium">{stream}</td>
-                            <td className="px-4 py-2 text-muted-foreground">{partner?.name ?? "—"}</td>
-                            <td className="px-4 py-2 text-muted-foreground max-w-[200px] truncate" title={dest}>{dest}</td>
-                            <td className="px-4 py-2 tabular-nums">{qty}</td>
-                            <td className="px-4 py-2">
+                            <td className="px-4 py-2 font-medium align-middle">{stream}</td>
+                            <td className="px-4 py-2 align-middle">
+                              <Input
+                                type="number"
+                                min={0}
+                                step="any"
+                                value={manualTonnesNum != null && manualTonnesNum >= 0 ? manualTonnesNum : ""}
+                                placeholder="0"
+                                className="h-8 w-24 tabular-nums"
+                                disabled={saveLoading}
+                                onChange={(e) => {
+                                  const v = e.target.value;
+                                  const num = v === "" ? null : (Number(v) >= 0 ? Number(v) : null);
+                                  setStreamPlans((prev) =>
+                                    prev.map((p) =>
+                                      p.category === stream ? { ...p, manual_qty_tonnes: num ?? undefined } : p
+                                    )
+                                  );
+                                }}
+                              />
+                            </td>
+                            <td className="px-4 py-2 align-middle">
+                              <Select
+                                value={(plan?.intended_outcomes?.length ? plan.intended_outcomes[0] : "Recycle") ?? "Recycle"}
+                                onValueChange={(v) => {
+                                  setStreamPlans((prev) =>
+                                    prev.map((p) =>
+                                      p.category === stream
+                                        ? { ...p, intended_outcomes: [v], hadMultipleOutcomes: false }
+                                        : p
+                                    )
+                                  );
+                                }}
+                                disabled={saveLoading}
+                              >
+                                <SelectTrigger className="h-8 w-full min-w-[120px] bg-background">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {INTENDED_OUTCOME_OPTIONS.map((opt) => (
+                                    <SelectItem key={opt} value={opt}>
+                                      {opt}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </td>
+                            <td className="px-4 py-2 align-middle">
+                              {effectivePartnerId ? (
+                                <Select
+                                  value={
+                                    plan?.destination_mode === "custom"
+                                      ? "custom"
+                                      : plan?.facility_id != null && String(plan.facility_id).trim() !== ""
+                                        ? String(plan.facility_id)
+                                        : "__none__"
+                                  }
+                                  onValueChange={(v) => {
+                                    if (v === "custom") {
+                                      setStreamPlans((prev) =>
+                                        prev.map((p) =>
+                                          p.category === stream
+                                            ? {
+                                                ...p,
+                                                destination_mode: "custom",
+                                                facility_id: null,
+                                              }
+                                            : p
+                                        )
+                                      );
+                                    } else if (v === "__none__") {
+                                      setStreamPlans((prev) =>
+                                        prev.map((p) =>
+                                          p.category === stream
+                                            ? { ...p, destination_mode: "facility", facility_id: null }
+                                            : p
+                                        )
+                                      );
+                                    } else {
+                                      setStreamPlans((prev) =>
+                                        prev.map((p) =>
+                                          p.category === stream
+                                            ? {
+                                                ...p,
+                                                destination_mode: "facility",
+                                                facility_id: v || null,
+                                              }
+                                            : p
+                                        )
+                                      );
+                                    }
+                                  }}
+                                  disabled={saveLoading}
+                                >
+                                  <SelectTrigger className="h-8 w-full max-w-[200px] bg-background">
+                                    <SelectValue placeholder="Select…" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="__none__">— Select —</SelectItem>
+                                    {facilityList.map((f) => (
+                                      <SelectItem key={f.id} value={String(f.id)}>
+                                        {(f as { name?: string }).name ?? f.id}
+                                      </SelectItem>
+                                    ))}
+                                    <SelectItem value="custom">Custom destination</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              ) : (
+                                <span className="text-muted-foreground text-xs">Set primary contractor or Edit</span>
+                              )}
+                            </td>
+                            <td className="px-4 py-2 align-middle">
+                              {streamComplete ? (
+                                <span className="text-emerald-600 dark:text-emerald-400 text-xs font-medium">Complete</span>
+                              ) : (
+                                <span className="text-amber-600 dark:text-amber-400 text-xs font-medium">Needs attention</span>
+                              )}
+                            </td>
+                            <td className="px-4 py-2 align-middle">
                               <Button
                                 type="button"
                                 variant="ghost"
                                 size="sm"
-                                onClick={() => setExpandedStreamPlans((prev) => ({ ...prev, [stream]: !expanded }))}
+                                onClick={() =>
+                                  setExpandedStreamPlans((prev) => {
+                                    const willOpen = !(prev[stream] ?? false);
+                                    if (willOpen) return { [stream]: true };
+                                    return { ...prev, [stream]: false };
+                                  })
+                                }
                               >
                                 {expanded ? "Collapse" : "Edit"}
                               </Button>
@@ -2397,27 +2847,34 @@ export default function ProjectInputsPage() {
                     const summaryDestinationTruncated =
                       summaryDestination.length > 50 ? `${summaryDestination.slice(0, 47)}…` : summaryDestination;
 
+                    const hasDestination = (summaryDestination ?? "").trim() !== "" && summaryDestination !== "—";
+                    const streamComplete = (safePlan.intended_outcomes?.length ?? 0) > 0 && hasDestination;
                     return (
                       <StreamRow
                         key={stream}
                         title={stream}
+                        icon={<Recycle className="size-4" />}
                         badges={
-                          <>
-                            <Badge variant="secondary" className="text-xs font-normal">
-                              {summaryOutcomes}
-                            </Badge>
-                            <span className="text-xs text-muted-foreground truncate max-w-[180px]">
-                              {titlePartnerName}
-                            </span>
-                          </>
+                          <Badge variant="secondary" className="text-xs font-normal">
+                            {summaryOutcomes}
+                          </Badge>
                         }
                         totalTonnes={summaryQtyUnit || "—"}
+                        facilitySummary={summaryDestinationTruncated || "—"}
+                        statusSummary={
+                          streamComplete ? (
+                            <span className="text-emerald-600 dark:text-emerald-400 text-xs">Complete</span>
+                          ) : (
+                            <span className="text-amber-600 dark:text-amber-400 text-xs">Needs attention</span>
+                          )
+                        }
                         expanded={expanded}
                         onToggle={() =>
-                          setExpandedStreamPlans((prev) => ({
-                            ...prev,
-                            [stream]: !(prev[stream] ?? false),
-                          }))
+                          setExpandedStreamPlans((prev) => {
+                            const willOpen = !(prev[stream] ?? false);
+                            if (willOpen) return { [stream]: true };
+                            return { ...prev, [stream]: false };
+                          })
                         }
                         onRemove={() =>
                           setSelectedWasteStreams((prev) => prev.filter((x) => x !== stream))
@@ -2425,7 +2882,7 @@ export default function ProjectInputsPage() {
                       >
                         <div className="space-y-4">
                             <div className="grid gap-2">
-                              <Label>Handling</Label>
+                              <Label className="text-sm">Handling</Label>
                               <p className="text-xs text-muted-foreground">
                                 Mixed = co-mingled / Separated = source-separated onsite
                               </p>
@@ -2456,66 +2913,44 @@ export default function ProjectInputsPage() {
                                 })}
                               </div>
                             </div>
-                            <div className="grid gap-4 sm:grid-cols-2">
-                              <div className="grid gap-2">
-                                <Label>Sub-material (optional)</Label>
-                                <Input
-                                  value={safePlan.sub_material ?? ""}
-                                  onChange={(e) => {
-                                    const v = e.target.value;
+                            <div className="grid gap-2">
+                              <Label>Disposal method (choose one)</Label>
+                                {safePlan.hadMultipleOutcomes && (
+                                  <p className="text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-md px-2 py-1.5">
+                                    Multiple methods detected; please select one.
+                                  </p>
+                                )}
+                                <p className="text-xs text-muted-foreground">
+                                  Select the single intended outcome for this waste stream.
+                                </p>
+                                <Select
+                                  value={
+                                    safePlan.intended_outcomes?.length > 0
+                                      ? safePlan.intended_outcomes[0]
+                                      : "Recycle"
+                                  }
+                                  onValueChange={(v) => {
                                     setStreamPlans((prev) =>
                                       prev.map((p) =>
                                         p.category === stream
-                                          ? { ...p, sub_material: v || null }
+                                          ? { ...p, intended_outcomes: [v], hadMultipleOutcomes: false }
                                           : p
                                       )
                                     );
                                   }}
-                                />
-                              </div>
-
-                              <div className="grid gap-2">
-                                <Label>Intended outcomes (multi-select)</Label>
-                                <div className="grid gap-2 grid-cols-2 sm:grid-cols-3">
-                                  {INTENDED_OUTCOME_OPTIONS.map((o) => {
-                                    const current =
-                                      safePlan.intended_outcomes?.length > 0
-                                        ? safePlan.intended_outcomes
-                                        : ["Recycle"];
-                                    const checked = current.includes(o);
-                                    return (
-                                      <div key={o} className="flex items-center gap-2">
-                                        <Checkbox
-                                          checked={checked}
-                                          onCheckedChange={() => {
-                                            setStreamPlans((prev) =>
-                                              prev.map((p) => {
-                                                if (p.category !== stream) return p;
-                                                const cur =
-                                                  Array.isArray(p.intended_outcomes) &&
-                                                  p.intended_outcomes.length > 0
-                                                    ? p.intended_outcomes
-                                                    : ["Recycle"];
-                                                const has = cur.includes(o);
-                                                const next = has
-                                                  ? cur.filter((x) => x !== o)
-                                                  : [...cur, o];
-                                                return {
-                                                  ...p,
-                                                  intended_outcomes:
-                                                    next.length > 0 ? next : ["Recycle"],
-                                                };
-                                              })
-                                            );
-                                          }}
-                                          disabled={saveLoading}
-                                        />
-                                        <Label className="font-normal">{o}</Label>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              </div>
+                                  disabled={saveLoading}
+                                >
+                                  <SelectTrigger className="w-full bg-background">
+                                    <SelectValue placeholder="Select disposal method" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {INTENDED_OUTCOME_OPTIONS.map((opt) => (
+                                      <SelectItem key={opt} value={opt}>
+                                        {opt}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
                             </div>
 
                             <div className="grid gap-2">
@@ -2710,44 +3145,50 @@ export default function ProjectInputsPage() {
                               </>
                             )}
 
-                            <div className="grid gap-2">
-                              <Label>Planned pathway / planned actions</Label>
-                              <Textarea
-                                value={safePlan.pathway}
-                                onChange={(e) => {
-                                  const v = e.target.value;
-                                  setStreamPlans((prev) =>
-                                    prev.map((p) =>
-                                      p.category === stream ? { ...p, pathway: v } : p
-                                    )
-                                  );
-                                }}
-                                rows={2}
-                                placeholder="e.g. Segregate where practical and send to approved recycler."
-                                disabled={saveLoading}
-                              />
-                            </div>
-
-                            <div className="grid gap-2">
-                              <Label>How is this waste generated?</Label>
-                              <Textarea
-                                value={safePlan.generated_by ?? ""}
-                                onChange={(e) => updatePlan(stream, { generated_by: e.target.value })}
-                                rows={2}
-                                placeholder="e.g. Demolition, offcuts, packaging"
-                                disabled={saveLoading}
-                              />
-                            </div>
-
-                            <div className="grid gap-2">
-                              <Label>On-site management</Label>
-                              <Textarea
-                                value={safePlan.on_site_management ?? ""}
-                                onChange={(e) => updatePlan(stream, { on_site_management: e.target.value })}
-                                rows={2}
-                                placeholder="e.g. Segregation, covered storage"
-                                disabled={saveLoading}
-                              />
+                            <div className="space-y-4">
+                              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Planning details</p>
+                              <div className="grid gap-4">
+                                <div className="grid gap-2">
+                                  <Label className="text-sm">Planned pathway</Label>
+                                  <Textarea
+                                    value={safePlan.pathway}
+                                    onChange={(e) => {
+                                      const v = e.target.value;
+                                      setStreamPlans((prev) =>
+                                        prev.map((p) =>
+                                          p.category === stream ? { ...p, pathway: v } : p
+                                        )
+                                      );
+                                    }}
+                                    rows={2}
+                                    placeholder="e.g. Segregate where practical and send to approved recycler."
+                                    disabled={saveLoading}
+                                    className="resize-none"
+                                  />
+                                </div>
+                                <div className="grid gap-2">
+                                  <Label className="text-sm">How is this waste generated?</Label>
+                                  <Textarea
+                                    value={safePlan.generated_by ?? ""}
+                                    onChange={(e) => updatePlan(stream, { generated_by: e.target.value })}
+                                    rows={2}
+                                    placeholder="e.g. Demolition, offcuts, packaging"
+                                    disabled={saveLoading}
+                                    className="resize-none"
+                                  />
+                                </div>
+                                <div className="grid gap-2">
+                                  <Label className="text-sm">On-site management</Label>
+                                  <Textarea
+                                    value={safePlan.on_site_management ?? ""}
+                                    onChange={(e) => updatePlan(stream, { on_site_management: e.target.value })}
+                                    rows={2}
+                                    placeholder="e.g. Segregation, covered storage"
+                                    disabled={saveLoading}
+                                    className="resize-none"
+                                  />
+                                </div>
+                              </div>
                             </div>
 
                             <div className="grid gap-4 sm:grid-cols-2">
@@ -2829,8 +3270,8 @@ export default function ProjectInputsPage() {
                               </div>
                             </div>
 
-                            <div className="rounded-lg border bg-muted/30 p-3 space-y-2">
-                              <Label className="font-semibold">Quantity summary (tonnes)</Label>
+                            <div className="rounded-md border border-border/50 bg-muted/20 p-3 space-y-2">
+                              <p className="text-xs font-medium text-muted-foreground">Quantity summary (tonnes)</p>
                               <div className="grid gap-1 text-sm">
                                 <div className="flex justify-between gap-4">
                                   <span className="text-muted-foreground">Manual</span>
@@ -2876,8 +3317,8 @@ export default function ProjectInputsPage() {
                               )}
                             </div>
 
-                            <div className="rounded-lg border bg-muted/30 p-3 space-y-3">
-                              <Label className="font-semibold">More options</Label>
+                            <div className="rounded-md border border-border/50 bg-muted/20 p-3 space-y-3">
+                              <p className="text-xs font-medium text-muted-foreground">More options</p>
                               <div className="grid gap-2">
                                 <Label className="font-normal">Density (kg/m³)</Label>
                                 <p className="text-xs text-muted-foreground">Used to convert quantity to tonnes for diversion. Default from stream type.</p>
@@ -3021,14 +3462,17 @@ export default function ProjectInputsPage() {
             </div>
               </InputsSectionCard>
 
-              {/* Section D — Resource Inputs */}
+              {/* Step 4 — Resource inputs (optional) */}
               <InputsSectionCard
                 id="resource-inputs"
                 icon={<FileInput className="size-5" />}
-                title="Resource Inputs"
-                description="Sorting level, target diversion, monitoring, and site controls."
+                title="Resource inputs (optional)"
+                description="Sorting level and target diversion. Optional for compliance."
+                whyMatters="Improves reporting and template defaults."
                 accent="zinc"
                 variant="grouped"
+                stepStatusBadge={getStepStatusBadge("resource-inputs")}
+                checklist={["Sorting level set", "Target diversion % (optional)"]}
               >
                 <FieldGroup gridClassName="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                   <div className="space-y-2">
@@ -3091,8 +3535,50 @@ export default function ProjectInputsPage() {
                     </div>
                   </div>
                 </FieldGroup>
+              </InputsSectionCard>
 
-                <p className="text-sm text-muted-foreground mt-4 mb-2">Advanced options</p>
+              {/* Step 5 — Monitoring & site controls */}
+              <InputsSectionCard
+                id="monitoring-site-controls"
+                icon={<ClipboardList className="size-5" />}
+                title="Monitoring & site controls"
+                description="Cadence, evidence types, and site controls for the SWMP."
+                whyMatters="Required for compliant monitoring and reporting."
+                accent="blue"
+                variant="grouped"
+                stepStatusBadge={getStepStatusBadge("monitoring-site-controls")}
+                checklist={[
+                  "Reporting cadence selected",
+                  "At least one evidence type or software toggled",
+                  "Site controls described (signage, contamination, hazardous)",
+                ]}
+                guidance={
+                  <GuidanceBanner
+                    complete={getStepStatusBadge("monitoring-site-controls") === "complete"}
+                    nextStepLabel="Select how you will evidence waste tracking"
+                    helperText="Cadence and evidence types are required for compliant monitoring and reporting."
+                    ctaLabel="Set monitoring"
+                    onCta={() => scrollToNextSection("monitoring-site-controls")}
+                  />
+                }
+                footer={
+                  <>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        handleSaveInputs({ preventDefault: () => {} } as React.FormEvent);
+                        scrollToNextSection("monitoring-site-controls");
+                      }}
+                      disabled={saveLoading}
+                    >
+                      Save & continue
+                    </Button>
+                    <span className="text-xs text-muted-foreground">You can come back and edit later.</span>
+                  </>
+                }
+              >
                 <Accordion type="single" collapsible defaultValue="" className="w-full max-w-full overflow-hidden">
               <AccordionItem value="monitoring" className="border border-border/50 rounded-lg px-0 mb-2 overflow-hidden">
                 <AccordionTrigger className="w-full px-4 py-4 bg-muted/40 hover:bg-muted/60 transition-colors [&[data-state=open]]:bg-muted/60 rounded-t-lg data-[state=open]:rounded-b-none [&>svg]:shrink-0">
@@ -3182,35 +3668,14 @@ export default function ProjectInputsPage() {
                   <span className="flex flex-col items-start text-left gap-0.5">
                     <span className="font-semibold text-lg">Site controls</span>
                     <span className="text-sm font-normal text-muted-foreground">
-                      Bin setup, signage, contamination &amp; hazardous controls
+                      Signage, contamination &amp; hazardous controls
                     </span>
                   </span>
                 </AccordionTrigger>
                 <AccordionContent className="px-4 pb-4">
                   <div className="space-y-6">
-                    <p className="text-sm text-muted-foreground">Describe how bins, signage, and contamination/hazard controls will be managed on site. These appear in the generated SWMP.</p>
+                    <p className="text-sm text-muted-foreground">Describe how signage and contamination/hazard controls will be managed on site. These appear in the generated SWMP.</p>
                     <Accordion type="single" collapsible className="w-full space-y-2">
-                      <AccordionItem value="bin_setup" className="rounded-lg border border-border/50 overflow-hidden bg-card">
-                        <AccordionTrigger className="px-4 py-3 hover:no-underline [&>svg]:shrink-0">
-                          <span className="flex items-center gap-3">
-                            <Package className="size-4 text-amber-600 dark:text-amber-400 shrink-0" />
-                            <span className="text-left">
-                              <span className="font-medium block">Bin setup</span>
-                              <span className="text-xs text-muted-foreground font-normal">How bins/skips will be provided and positioned.</span>
-                            </span>
-                          </span>
-                        </AccordionTrigger>
-                        <AccordionContent className="px-4 pb-4 pt-0">
-                          <Textarea
-                            value={siteControls.bin_setup}
-                            onChange={(e) => setSiteControls((prev) => ({ ...prev, bin_setup: e.target.value }))}
-                            rows={2}
-                            disabled={saveLoading}
-                            placeholder={DEFAULT_SITE_CONTROLS.bin_setup}
-                            className="bg-muted/30 rounded-lg focus:ring-2 focus:ring-primary/20 border-border max-w-3xl"
-                          />
-                        </AccordionContent>
-                      </AccordionItem>
                       <AccordionItem value="signage_storage" className="rounded-lg border border-border/50 overflow-hidden bg-card">
                         <AccordionTrigger className="px-4 py-3 hover:no-underline [&>svg]:shrink-0">
                           <span className="flex items-center gap-3">
@@ -3281,14 +3746,21 @@ export default function ProjectInputsPage() {
                 </Accordion>
               </InputsSectionCard>
 
-              {/* Compliance & Notes */}
+              {/* Step 6 — Review & generate */}
               <InputsSectionCard
                 id="compliance-notes"
-                icon={<ClipboardList className="size-5" />}
-                title="Compliance & Notes"
-                description="Responsibilities, notes, save inputs, and generate SWMP."
+                icon={<FileText className="size-5" />}
+                title="Review & generate"
+                description="Responsibilities, notes, save inputs, and generate the SWMP document."
+                whyMatters="Final step to produce a compliant Site Waste Management Plan."
                 accent="amber"
                 variant="grouped"
+                stepStatusBadge={getStepStatusBadge("compliance-notes")}
+                checklist={[
+                  "Responsibilities and notes (optional)",
+                  "Save Inputs",
+                  "Generate SWMP when ready",
+                ]}
               >
                 <Accordion type="single" collapsible defaultValue="" className="w-full max-w-full overflow-hidden">
               <AccordionItem value="responsibilities" className="border border-border/50 rounded-lg px-0 mb-2 overflow-hidden">

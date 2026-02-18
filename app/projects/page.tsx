@@ -316,15 +316,15 @@ export default function ProjectsPage() {
     }
     const missing: string[] = [];
     if (!state.place_id || state.lat == null || state.lng == null) missing.push("Site address (choose from suggestions)");
-    if (!state.region) missing.push("Region");
-    const pt = state.projectType === "Other" ? state.projectTypeOther.trim() : state.projectType.trim();
+    if (!(state.region ?? "").trim()) missing.push("Region");
+    const pt = state.projectType === "Other" ? (state.projectTypeOther ?? "").trim() : (state.projectType ?? "").trim();
     if (!pt) missing.push("Project type");
-    if (!state.startDate) missing.push("Start date");
-    if (!state.clientName.trim()) missing.push("Client name");
-    if (!state.mainContractor.trim()) missing.push("Main contractor");
-    if (!state.swmpOwner.trim()) missing.push("SWMP owner");
+    if (!(state.startDate ?? "").trim()) missing.push("Start date");
+    if (!(state.clientName ?? "").trim()) missing.push("Client name");
+    if (!(state.mainContractor ?? "").trim()) missing.push("Main contractor");
+    if (!(state.swmpOwner ?? "").trim()) missing.push("SWMP owner");
     if (missing.length) {
-      setSheetError(`Please fill in: ${missing.join(", ")}`);
+      setSheetError(`Please complete the highlighted fields: ${missing.join(", ")}`);
       return;
     }
     const validateRes = await fetch("/api/validate-address", {

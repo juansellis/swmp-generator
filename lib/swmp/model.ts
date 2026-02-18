@@ -70,6 +70,8 @@ export type WasteStreamPlanInput = {
   forecast_unit?: string | null;
   /** Handling: mixed = co-mingled, separated = source-separated onsite. Default mixed. */
   handling_mode?: "mixed" | "separated" | null;
+  /** Transient: set when loading legacy data with multiple intended_outcomes; not persisted. */
+  hadMultipleOutcomes?: boolean;
 };
 
 // ---------------------------------------------------------------------------
@@ -345,7 +347,9 @@ function normalizeWasteStreamPlan(raw: unknown): WasteStreamPlanInput {
   const safeIntended = (rawIntended as string[])
     .map(normalizeOutcome)
     .filter((x) => INTENDED_OUTCOME_SET.has(x));
-  const intended_outcomes = safeIntended.length > 0 ? safeIntended : ["Recycle"];
+  const hadMultipleOutcomes = safeIntended.length > 1;
+  const intended_outcomes =
+    safeIntended.length > 0 ? (hadMultipleOutcomes ? [safeIntended[0]] : safeIntended) : ["Recycle"];
 
   const rawUnit = p?.unit;
   const unit: PlanUnit | null =
@@ -405,6 +409,7 @@ function normalizeWasteStreamPlan(raw: unknown): WasteStreamPlanInput {
     category,
     sub_material: (p?.sub_material != null && String(p.sub_material).trim()) || null,
     intended_outcomes,
+    ...(hadMultipleOutcomes ? { hadMultipleOutcomes: true } : {}),
     destination_mode,
     partner_id,
     facility_id,

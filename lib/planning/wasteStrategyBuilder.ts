@@ -22,6 +22,12 @@ import {
   getCarbonSavingPerTonnesDivertedTco2e,
   NOTE_APPROXIMATE_RANGES,
 } from "./wasteStrategyConstants";
+import {
+  buildDistanceMapFromRows,
+  getDistanceForFacility,
+  type DistanceEntry,
+  type DistanceRow,
+} from "@/lib/distance/getProjectFacilityDistanceMap";
 
 const MIXED_CD_KEY = "Mixed C&D";
 
@@ -50,7 +56,7 @@ export type StreamPlanItem = {
   recommended_handling: RecommendedHandling;
   /** User-assigned facility from inputs (plan.facility_id). Null if not set. */
   assigned_facility_id: string | null;
-  /** Destination type from inputs; used for strict destination display in Outputs. */
+  /** Destination type from inputs; used for strict destination display in Report. */
   destination_mode: "facility" | "custom" | null;
   /** Custom destination display (name or address) when destination_mode === 'custom'. */
   custom_destination_name: string | null;
@@ -228,15 +234,15 @@ function recommendHandling(
 // ---------------------------------------------------------------------------
 
 /**
- * Optional map: facility_id -> distance_m. When provided, facility selection
- * sorts by diversion_rate first, then by shorter distance (used when project_facility_distances exist).
+ * Optional map from project_facility_distances (normalized by facility id). When provided, facility selection
+ * sorts by diversion_rate first, then by shorter distance.
  */
 function pickBestFacility(
   streamName: string,
   region: string | null,
   existingFacilityId: string | null,
   partnerId: string | null,
-  distanceByFacilityId?: Record<string, number> | null
+  distanceMap?: Record<string, DistanceEntry> | null
 ): { facility: FacilityWithRate | null; partnerId: string | null; partnerName: string | null } {
   const existing = existingFacilityId ? getFacilityById(existingFacilityId) : null;
   const existingWithRate = existing as FacilityWithRate | null;
@@ -268,8 +274,8 @@ function pickBestFacility(
     const rateA = a.diversion_rate ?? 0;
     const rateB = b.diversion_rate ?? 0;
     if (rateB !== rateA) return rateB - rateA;
-    const distA = distanceByFacilityId?.[a.id] ?? Infinity;
-    const distB = distanceByFacilityId?.[b.id] ?? Infinity;
+    const distA = distanceMap ? (getDistanceForFacility(distanceMap, a.id)?.distance_km ?? Infinity) : Infinity;
+    const distB = distanceMap ? (getDistanceForFacility(distanceMap, b.id)?.distance_km ?? Infinity) : Infinity;
     return distA - distB;
   });
   const best = sorted[0];
@@ -291,7 +297,7 @@ function buildStreamPlan(
   forecastTonnes: number,
   region: string | null,
   projectPartnerId: string | null,
-  distanceByFacilityId?: Record<string, number> | null
+  distanceMap?: Record<string, DistanceEntry> | null
 ): StreamPlanItem {
   const streamName = (plan.category ?? "").trim() || MIXED_CD_KEY;
   const totalTonnes = manualTonnes + forecastTonnes;
@@ -304,7 +310,7 @@ function buildStreamPlan(
     region,
     plan.facility_id ?? null,
     plan.partner_id ?? plan.waste_contractor_partner_id ?? projectPartnerId,
-    distanceByFacilityId
+    distanceMap
   );
 
   const rationale: string[] = [];
@@ -370,11 +376,11 @@ function buildStreamPlan(
     plan.duration_min != null && Number.isFinite(plan.duration_min) && plan.duration_min >= 0
       ? plan.duration_min
       : null;
-  const cacheDistanceM = assignedFacilityId ? distanceByFacilityId?.[assignedFacilityId] : null;
+  const cacheEntry = assignedFacilityId ? getDistanceForFacility(distanceMap ?? {}, assignedFacilityId) : null;
   const distance_km =
     planDistanceKm ??
-    (cacheDistanceM != null && Number.isFinite(cacheDistanceM) ? cacheDistanceM / 1000 : null);
-  const duration_min = planDurationMin ?? null;
+    (cacheEntry?.distance_km != null && Number.isFinite(cacheEntry.distance_km) ? cacheEntry.distance_km : null);
+  const duration_min = planDurationMin ?? (cacheEntry?.duration_min ?? null);
 
   return {
     stream_id: streamName.replace(/\s+/g, "-").toLowerCase(),
@@ -510,14 +516,14 @@ function buildRecommendations(
     pushRec(
       recs,
       {
-        title: "Set intended outcomes for streams",
-        description: `${unknownPercent.toFixed(0)}% of tonnes have unknown or unset intended outcomes. Setting Recycle/Reuse/Landfill per stream improves diversion reporting.`,
+        title: "Select disposal method for streams",
+        description: `${unknownPercent.toFixed(0)}% of tonnes have no disposal method set. Select Recycle/Reuse/Landfill per stream to fix diversion reporting.`,
         priority: "medium",
         confidence: "high",
         category: "data_quality",
         triggers: ["outcomes_unknown_high_percent"],
         estimated_impact: { notes: ["Accurate outcomes enable diversion % and facility reporting."] },
-        implementation_steps: ["In Inputs, set intended outcome(s) for each waste stream plan."],
+        implementation_steps: ["In Inputs, select a disposal method for each waste stream plan."],
         apply_action: { type: "set_outcome", payload: {} },
       },
       "data_quality"
@@ -965,9 +971,9 @@ export async function buildWasteStrategy(
     Promise.resolve(
       supabaseClient
         .from("project_facility_distances")
-        .select("facility_id, distance_m")
+        .select("facility_id, distance_m, duration_s")
         .eq("project_id", projectId)
-    ).catch(() => ({ data: [] as { facility_id: string; distance_m: number }[], error: null })),
+    ).catch(() => ({ data: [] as DistanceRow[], error: null })),
   ]);
 
   const rawInputs = (inputsResult.data as { inputs?: unknown } | null)?.inputs ?? null;
@@ -983,13 +989,8 @@ export async function buildWasteStrategy(
     items: forecastItems,
   } = countsAndItems;
 
-  const distanceRows = (distancesResult.data ?? []) as { facility_id: string; distance_m: number }[];
-  const distanceByFacilityId: Record<string, number> = {};
-  for (const row of distanceRows) {
-    if (row.facility_id != null && typeof row.distance_m === "number") {
-      distanceByFacilityId[row.facility_id] = row.distance_m;
-    }
-  }
+  const distanceRows = (distancesResult.data ?? []) as DistanceRow[];
+  const distanceMap = buildDistanceMapFromRows(distanceRows);
 
   const streamPlans: StreamPlanItem[] = [];
   /** Distinct facility_id from waste streams where total_tonnes > 0 and facility_id is not null. */
@@ -1018,7 +1019,7 @@ export async function buildWasteStrategy(
       utilisedFacilityIds.add(facilityId);
     }
     streamPlans.push(
-      buildStreamPlan(plan, manualTonnes, forecastTonnes, region, projectPartnerId, distanceByFacilityId)
+      buildStreamPlan(plan, manualTonnes, forecastTonnes, region, projectPartnerId, distanceMap)
     );
   }
 

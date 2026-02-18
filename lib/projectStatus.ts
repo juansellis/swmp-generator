@@ -44,7 +44,7 @@ export function computeProjectStatus(data: ProjectStatusData): ProjectStatus {
 export const STATUS_LABELS = {
   inputs: "Inputs",
   forecasting: "Forecasting",
-  outputs: "Outputs",
+  outputs: "Report",
 } as const;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
