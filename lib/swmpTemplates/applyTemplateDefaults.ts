@@ -6,10 +6,12 @@
 import type { SwmpInputs, WasteStreamPlanInput, MonitoringInput, SiteControlsInput, ResponsibilityInput } from "@/lib/swmp/model";
 import type { TemplatePack } from "./types";
 
+/** Treats null, undefined, blank, and "—" (report placeholder) as empty so templates can fill. */
 function isEmptyString(v: unknown): boolean {
   if (v == null) return true;
   if (typeof v !== "string") return true;
-  return v.trim() === "";
+  const t = v.trim();
+  return t === "" || t === "—";
 }
 
 function isEmptyArray(v: unknown): boolean {
@@ -33,7 +35,8 @@ export function applyTemplateDefaults({
 
   // Waste stream plans: apply per-stream defaults only where current value is empty
   const waste_stream_plans: WasteStreamPlanInput[] = (current.waste_stream_plans ?? []).map((plan) => {
-    const defaults = template.wasteStreamDefaults?.[plan.category];
+    const defaults =
+      template.wasteStreamDefaults?.[plan.category] ?? template.wasteStreamDefaults?.["*"];
     if (!defaults) return { ...plan };
 
     const pathway =

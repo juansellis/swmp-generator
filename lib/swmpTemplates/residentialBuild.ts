@@ -35,6 +35,11 @@ export const residentialBuild: TemplatePack = {
       generation: "Ceiling and wall insulation offcuts.",
       onsite_management: "Keep dry and separate from general waste.",
     },
+    "*": {
+      planned_pathway: "Segregate where practical and send to an approved recycler/processor.",
+      generation: "Construction and packaging waste from build.",
+      onsite_management: "Dedicated bins where practical; keep key streams separate.",
+    },
   },
   monitoringDefaults: {
     methods: ["Dockets", "Photos"],

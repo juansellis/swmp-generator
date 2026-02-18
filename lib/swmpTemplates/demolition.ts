@@ -40,6 +40,11 @@ export const demolition: TemplatePack = {
       generation: "Windows and glazing from strip-out.",
       onsite_management: "Dedicated container; handle with care.",
     },
+    "*": {
+      planned_pathway: "Segregate where practical and send to an approved recycler/processor.",
+      generation: "Demolition and strip-out waste.",
+      onsite_management: "Dedicated bins by stream; maximise separation at source.",
+    },
   },
   monitoringDefaults: {
     methods: ["Dockets", "Invoices/receipts", "Photos"],

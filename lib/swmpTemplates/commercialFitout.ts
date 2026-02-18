@@ -30,6 +30,11 @@ export const commercialFitout: TemplatePack = {
       generation: "Packaging from new materials and fit-out.",
       onsite_management: "Cardboard-only bin or bundling area.",
     },
+    "*": {
+      planned_pathway: "Segregate where practical and send to an approved recycler/processor.",
+      generation: "Fit-out and construction waste.",
+      onsite_management: "Dedicated bins where practical; separate key streams.",
+    },
   },
   monitoringDefaults: {
     methods: ["Dockets", "Invoices/receipts"],

@@ -2,8 +2,10 @@ import type { TemplatePack } from "./types";
 import { commercialFitout } from "./commercialFitout";
 import { residentialBuild } from "./residentialBuild";
 import { demolition } from "./demolition";
+import { civilEarthworks } from "./civilEarthworks";
+import { generic } from "./generic";
 
-const PACKS: TemplatePack[] = [commercialFitout, residentialBuild, demolition];
+const PACKS: TemplatePack[] = [commercialFitout, residentialBuild, demolition, civilEarthworks, generic];
 
 /** Project type → template pack id (or key). Must match option values from PROJECT_TYPE_OPTIONS. */
 const PROJECT_TYPE_TO_PACK: Record<string, string> = {
@@ -17,19 +19,23 @@ const PROJECT_TYPE_TO_PACK: Record<string, string> = {
   "Residential renovation": residentialBuild.id,
   "Residential fit-out": residentialBuild.id,
   "Demolition / strip-out (commercial)": demolition.id,
+  "Civil works / earthworks": civilEarthworks.id,
+  "Roading": civilEarthworks.id,
+  "Three waters / underground services": civilEarthworks.id,
+  "Landscaping": civilEarthworks.id,
 };
 
 /**
- * Returns the template pack for the given project type, or null if none.
+ * Returns the template pack for the given project type, or the generic pack if unknown.
  */
-export function getTemplatePack(projectType: string): TemplatePack | null {
+export function getTemplatePack(projectType: string): TemplatePack {
   const trimmed = (projectType ?? "").trim();
-  if (!trimmed) return null;
+  if (!trimmed) return generic;
   const packId = PROJECT_TYPE_TO_PACK[trimmed];
-  if (!packId) return null;
-  return PACKS.find((p) => p.id === packId) ?? null;
+  if (!packId) return generic;
+  return PACKS.find((p) => p.id === packId) ?? generic;
 }
 
 export { applyTemplateDefaults } from "./applyTemplateDefaults";
 export type { TemplatePack, TemplateWasteStreamDefaults } from "./types";
-export { commercialFitout, residentialBuild, demolition };
+export { commercialFitout, residentialBuild, demolition, civilEarthworks, generic };

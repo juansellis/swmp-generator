@@ -553,7 +553,9 @@ export default function ProjectInputsPage() {
   // Keep detailed stream plans in sync with the selected streams.
   // - One plan per selected stream (category === stream)
   // - Remove plans for unselected streams
+  // - New plans get project-type template defaults for pathway, how generated, on-site management
   useEffect(() => {
+    const template = getTemplatePack(effectiveProjectType);
     setStreamPlans((prev) => {
       const prevByCategory = new Map(prev.map((p) => [p.category, p] as const));
 
@@ -561,6 +563,9 @@ export default function ProjectInputsPage() {
         const existing = prevByCategory.get(stream);
         if (existing) return existing;
 
+        const defaults =
+          template.wasteStreamDefaults?.[stream] ?? template.wasteStreamDefaults?.["*"];
+        const defaultPathway = `Segregate ${stream} where practical and send to an approved recycler/processor.`;
         return {
           category: stream,
           sub_material: null,
@@ -576,14 +581,14 @@ export default function ProjectInputsPage() {
           custom_destination_lng: null,
           partner: null,
           partner_overridden: false,
-          pathway: `Segregate ${stream} where practical and send to an approved recycler/processor.`,
+          pathway: defaults?.planned_pathway ?? defaultPathway,
           notes: null,
           estimated_qty: null,
           unit: getDefaultUnitForStreamLabel(stream),
           density_kg_m3: null,
           thickness_m: getDefaultThicknessForStreamLabel(stream) ?? null,
-          generated_by: null,
-          on_site_management: null,
+          generated_by: defaults?.generation ?? null,
+          on_site_management: defaults?.onsite_management ?? null,
           destination: null,
           distance_km: null,
           duration_min: null,
@@ -602,7 +607,7 @@ export default function ProjectInputsPage() {
 
       return next;
     });
-  }, [selectedWasteStreams]);
+  }, [selectedWasteStreams, effectiveProjectType]);
 
   // Default selection for new/empty projects: ensure Mixed C&D is selected on first load.
   const didInitDefaultStreamsRef = useRef(false);
@@ -876,9 +881,7 @@ export default function ProjectInputsPage() {
           })),
         };
         const template = getTemplatePack(project.project_type ?? "");
-        const merged = template
-          ? applyTemplateDefaults({ template, currentInputs })
-          : currentInputs;
+        const merged = applyTemplateDefaults({ template, currentInputs });
         const mergedResp = merged.responsibilities.map((r, i) => ({
           ...r,
           party: i === 0 ? (project.swmp_owner ?? r.party) : i === 1 ? (project.main_contractor ?? r.party) : r.party,
@@ -952,7 +955,6 @@ export default function ProjectInputsPage() {
     (projectTypeOverride?: string) => {
       const effectiveType = (projectTypeOverride ?? effectiveProjectType ?? "").trim();
       const template = getTemplatePack(effectiveType);
-      if (!template) return;
 
       const defaults = defaultSwmpInputs(projectId ?? undefined);
       const currentInputs = {
@@ -1165,7 +1167,7 @@ export default function ProjectInputsPage() {
     });
   }, [streamPlans, facilitiesByPartner, primaryWasteContractorPartnerId, getEffectivePartnerId]);
 
-  // Auto-save when destination (facility or custom) changes so distance recompute runs and UI updates without refresh.
+  // Auto-save when destination or plan text (pathway, how generated, on-site management) changes.
   const destinationSignatureRef = useRef<string>("");
   const initialMountRef = useRef(true);
   useEffect(() => {
@@ -1176,6 +1178,9 @@ export default function ProjectInputsPage() {
         fid: p.facility_id ?? "",
         addr: p.custom_destination_address ?? "",
         pid: p.custom_destination_place_id ?? "",
+        pathway: p.pathway ?? "",
+        generated_by: p.generated_by ?? "",
+        on_site_management: p.on_site_management ?? "",
       }))
     );
     if (initialMountRef.current) {
