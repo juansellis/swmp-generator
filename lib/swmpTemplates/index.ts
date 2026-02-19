@@ -1,14 +1,16 @@
 import type { TemplatePack } from "./types";
+import { commercialBuild } from "./commercialBuild";
 import { commercialFitout } from "./commercialFitout";
 import { residentialBuild } from "./residentialBuild";
 import { demolition } from "./demolition";
 import { civilEarthworks } from "./civilEarthworks";
 import { generic } from "./generic";
 
-const PACKS: TemplatePack[] = [commercialFitout, residentialBuild, demolition, civilEarthworks, generic];
+const PACKS: TemplatePack[] = [commercialBuild, commercialFitout, residentialBuild, demolition, civilEarthworks, generic];
 
 /** Project type → template pack id (or key). Must match option values from PROJECT_TYPE_OPTIONS. */
 const PROJECT_TYPE_TO_PACK: Record<string, string> = {
+  "Commercial Build": commercialBuild.id,
   "Commercial fit-out": commercialFitout.id,
   "Office fit-out": commercialFitout.id,
   "Retail fit-out": commercialFitout.id,
@@ -38,4 +40,4 @@ export function getTemplatePack(projectType: string): TemplatePack {
 
 export { applyTemplateDefaults } from "./applyTemplateDefaults";
 export type { TemplatePack, TemplateWasteStreamDefaults } from "./types";
-export { commercialFitout, residentialBuild, demolition, civilEarthworks, generic };
+export { commercialBuild, commercialFitout, residentialBuild, demolition, civilEarthworks, generic };

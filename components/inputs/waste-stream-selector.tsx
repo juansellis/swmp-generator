@@ -10,6 +10,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { InfoTip } from "@/components/inputs/info-tip";
 import { cn } from "@/lib/utils";
 
 const MAX_SUGGESTIONS = 8;
@@ -126,25 +127,39 @@ export function WasteStreamSelector({
         </Popover>
 
         {hasTemplate && (
+          <span className="inline-flex items-center gap-1.5">
+            <Button
+              type="button"
+              variant="outline"
+              size="default"
+              disabled={disabled}
+              onClick={onApplyTemplate}
+            >
+              Apply template
+            </Button>
+            <InfoTip
+              label="Apply template help"
+              content="Adds recommended waste streams and default plan text for the selected project type. Won’t overwrite anything you’ve already edited."
+              variant="tooltip"
+            />
+          </span>
+        )}
+        <span className="inline-flex items-center gap-1.5">
           <Button
             type="button"
             variant="outline"
             size="default"
             disabled={disabled}
-            onClick={onApplyTemplate}
+            onClick={onAddCommonSet}
           >
-            Apply template
+            Add common set
           </Button>
-        )}
-        <Button
-          type="button"
-          variant="outline"
-          size="default"
-          disabled={disabled}
-          onClick={onAddCommonSet}
-        >
-          Add common set
-        </Button>
+          <InfoTip
+            label="Add common set help"
+            content="Adds a typical set of streams used across projects. You can remove any you don’t need."
+            variant="tooltip"
+          />
+        </span>
       </div>
 
       {selected.length > 0 && (

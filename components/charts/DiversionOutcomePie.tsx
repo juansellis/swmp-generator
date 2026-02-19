@@ -6,6 +6,9 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import type { DiversionSummaryItem } from "@/lib/wasteChartData";
 import { usePrintMode } from "./usePrintMode";
 
+const EXPORT_CHART_WIDTH = 520;
+const EXPORT_CHART_HEIGHT = 260;
+
 const DIVERTED_COLOR = "hsl(142 76% 36%)"; // green
 const LANDFILL_COLOR = "hsl(0 84% 60%)";   // red
 
@@ -13,11 +16,50 @@ export interface DiversionOutcomePieProps {
   data: DiversionSummaryItem[];
   /** Optional title override */
   title?: string;
+  /** When true, render fixed-size chart without ResponsiveContainer (for PDF export) */
+  exportMode?: boolean;
 }
 
-export function DiversionOutcomePie({ data, title = "Diversion Summary" }: DiversionOutcomePieProps) {
+export function DiversionOutcomePie({ data, title = "Diversion Summary", exportMode = false }: DiversionOutcomePieProps) {
   const isPrint = usePrintMode();
   const hasData = data.some((d) => d.value > 0);
+  const noAnimation = exportMode || isPrint;
+
+  if (exportMode) {
+    return (
+      <div style={{ width: EXPORT_CHART_WIDTH, height: EXPORT_CHART_HEIGHT }} className="overflow-visible">
+        {!hasData ? (
+          <p className="text-sm text-muted-foreground py-8 text-center">No diversion data to display.</p>
+        ) : (
+          <PieChart width={EXPORT_CHART_WIDTH} height={EXPORT_CHART_HEIGHT} margin={{ top: 8, right: 8, bottom: 8, left: 8 }}>
+            <Pie
+              data={data}
+              dataKey="value"
+              nameKey="name"
+              cx="50%"
+              cy="45%"
+              innerRadius={0}
+              outerRadius="75%"
+              paddingAngle={1}
+              isAnimationActive={false}
+            >
+              {data.map((entry) => (
+                <Cell
+                  key={entry.name}
+                  fill={entry.name === "Landfill" ? LANDFILL_COLOR : DIVERTED_COLOR}
+                />
+              ))}
+            </Pie>
+            <Legend
+              layout="horizontal"
+              verticalAlign="bottom"
+              wrapperStyle={{ fontSize: "12px" }}
+            />
+          </PieChart>
+        )}
+      </div>
+    );
+  }
 
   return (
     <Card className="overflow-hidden print:break-inside-avoid">
@@ -40,9 +82,9 @@ export function DiversionOutcomePie({ data, title = "Diversion Summary" }: Diver
                   innerRadius={0}
                   outerRadius="75%"
                   paddingAngle={1}
-                  isAnimationActive={!isPrint}
+                  isAnimationActive={!noAnimation}
                 >
-                  {data.map((entry, index) => (
+                  {data.map((entry) => (
                     <Cell
                       key={entry.name}
                       fill={entry.name === "Landfill" ? LANDFILL_COLOR : DIVERTED_COLOR}

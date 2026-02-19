@@ -8,14 +8,14 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { normalizeSwmpInputs, SWMP_INPUTS_JSON_COLUMN } from "@/lib/swmp/schema";
 import type { WasteStreamPlanInput } from "@/lib/swmp/model";
-import { planManualQtyToTonnes } from "@/lib/wasteStreamDefaults";
+import { getDefaultUnitForStreamLabel, planManualQtyToTonnes } from "@/lib/wasteStreamDefaults";
 import {
   getFacilitiesForStream,
   getFacilityById,
   type Facility,
 } from "@/lib/facilities/getFacilities";
 import { getPartnerById } from "@/lib/partners/getPartners";
-import { calcWasteQty, getConversionOptions, toWasteKg } from "@/lib/forecastApi";
+import { calcWasteQty, getConversionOptions, getStreamsWithConfiguredFactors, toWasteKg } from "@/lib/forecastApi";
 import {
   getCostSavingPerTonnesDivertedFromLandfill,
   getCostSavingPerTonnesDivertedFromMixed,
@@ -148,11 +148,19 @@ export type WasteStrategyNarrative = {
   major_drivers_paragraph: string;
 };
 
+export type ConversionsUsed = {
+  usedFallback: boolean;
+  fallbackCount: number;
+  missingKeys: string[];
+};
+
 export type WasteStrategyResult = {
   summary: WasteStrategySummary;
   streamPlans: StreamPlanItem[];
   recommendations: StrategyRecommendation[];
   narrative: WasteStrategyNarrative;
+  /** Only show conversion warning when usedFallback or fallbackCount > 0. */
+  conversionsUsed: ConversionsUsed;
 };
 
 // Extended facility type for optional diversion_rate (future DB)
@@ -957,27 +965,29 @@ export async function buildWasteStrategy(
   projectId: string,
   supabaseClient: SupabaseClient
 ): Promise<WasteStrategyResult> {
-  const [inputsResult, projectResult, countsAndItems, distancesResult] = await Promise.all([
-    supabaseClient
-      .from("swmp_inputs")
-      .select(SWMP_INPUTS_JSON_COLUMN)
-      .eq("project_id", projectId)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle(),
-    supabaseClient
-      .from("projects")
-      .select("id, region, primary_waste_contractor_partner_id")
-      .eq("id", projectId)
-      .single(),
-    getForecastCountsAndItems(supabaseClient, projectId),
-    Promise.resolve(
+  const [inputsResult, projectResult, countsAndItems, distancesResult, streamsWithConfiguredFactors] =
+    await Promise.all([
       supabaseClient
-        .from("project_facility_distances")
-        .select("facility_id, distance_m, duration_s")
+        .from("swmp_inputs")
+        .select(SWMP_INPUTS_JSON_COLUMN)
         .eq("project_id", projectId)
-    ).catch(() => ({ data: [] as DistanceRow[], error: null })),
-  ]);
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      supabaseClient
+        .from("projects")
+        .select("id, region, primary_waste_contractor_partner_id")
+        .eq("id", projectId)
+        .single(),
+      getForecastCountsAndItems(supabaseClient, projectId),
+      Promise.resolve(
+        supabaseClient
+          .from("project_facility_distances")
+          .select("facility_id, distance_m, duration_s")
+          .eq("project_id", projectId)
+      ).catch(() => ({ data: [] as DistanceRow[], error: null })),
+      getStreamsWithConfiguredFactors(supabaseClient),
+    ]);
 
   const rawInputs = (inputsResult.data as { inputs?: unknown } | null)?.inputs ?? null;
   const inputs = rawInputs ? normalizeSwmpInputs(rawInputs) : null;
@@ -998,33 +1008,60 @@ export async function buildWasteStrategy(
   const streamPlans: StreamPlanItem[] = [];
   /** Distinct facility_id from waste streams where total_tonnes > 0 and facility_id is not null. */
   const utilisedFacilityIds = new Set<string>();
+  /** Stream names that needed conversion (m/m3/m2) but had no configured factor — used fallback. */
+  const conversionFallbackStreams = new Set<string>();
 
   for (const plan of plans) {
-    const manualTonnes =
-      plan.manual_qty_tonnes != null && Number.isFinite(plan.manual_qty_tonnes) && plan.manual_qty_tonnes >= 0
-        ? plan.manual_qty_tonnes
-        : (planManualQtyToTonnes(
-            {
-              estimated_qty: plan.estimated_qty,
-              unit: plan.unit,
-              density_kg_m3: plan.density_kg_m3,
-              thickness_m: plan.thickness_m,
-            },
-            (plan.category ?? "").trim() || MIXED_CD_KEY
-          ) ?? 0);
+    const streamName = (plan.category ?? "").trim() || MIXED_CD_KEY;
+    const usedManualQtyTonnes =
+      plan.manual_qty_tonnes != null &&
+      Number.isFinite(plan.manual_qty_tonnes) &&
+      plan.manual_qty_tonnes >= 0;
+    const manualTonnes = usedManualQtyTonnes
+      ? plan.manual_qty_tonnes
+      : (planManualQtyToTonnes(
+          {
+            estimated_qty: plan.estimated_qty,
+            unit: plan.unit,
+            density_kg_m3: plan.density_kg_m3,
+            thickness_m: plan.thickness_m,
+          },
+          streamName
+        ) ?? 0);
+    if (
+      !usedManualQtyTonnes &&
+      plan.estimated_qty != null &&
+      Number.isFinite(plan.estimated_qty) &&
+      plan.estimated_qty >= 0
+    ) {
+      const unit = (plan.unit ?? getDefaultUnitForStreamLabel(streamName))
+        .toString()
+        .toLowerCase()
+        .trim();
+      if ((unit === "m" || unit === "m3" || unit === "m2") && !streamsWithConfiguredFactors.has(streamName)) {
+        conversionFallbackStreams.add(streamName);
+      }
+    }
     const forecastTonnes =
       plan.forecast_qty != null && Number.isFinite(plan.forecast_qty) && plan.forecast_qty >= 0
         ? plan.forecast_qty
         : 0;
-    const totalTonnes = manualTonnes + forecastTonnes;
+    const totalTonnes = (manualTonnes ?? 0) + forecastTonnes;
     const facilityId = plan.facility_id != null && String(plan.facility_id).trim() !== "" ? String(plan.facility_id).trim() : null;
     if (totalTonnes > 0 && facilityId != null) {
       utilisedFacilityIds.add(facilityId);
     }
     streamPlans.push(
-      buildStreamPlan(plan, manualTonnes, forecastTonnes, region, projectPartnerId, distanceMap)
+      buildStreamPlan(plan, manualTonnes ?? 0, forecastTonnes, region, projectPartnerId, distanceMap)
     );
   }
+
+  const missingKeys = Array.from(conversionFallbackStreams);
+  const conversionsUsed: ConversionsUsed = {
+    usedFallback: missingKeys.length > 0,
+    fallbackCount: missingKeys.length,
+    missingKeys,
+  };
 
   const { diverted, landfill, unknown, total } = computeDiversionTotals(streamPlans);
   const diversionPercent = total > 0 ? (diverted / total) * 100 : 0;
@@ -1064,5 +1101,6 @@ export async function buildWasteStrategy(
     streamPlans,
     recommendations,
     narrative,
+    conversionsUsed,
   };
 }

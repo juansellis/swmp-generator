@@ -60,6 +60,7 @@ import { DecisionChip, type DecisionChipState } from "@/components/ui/decision-c
 import { useProjectContext } from "@/app/projects/[id]/project-context";
 import { StreamPlanningCards, type OptimiserStream, type StreamFilterState } from "./stream-planning-cards";
 import { isRecommendationResolved } from "./recommendation-helpers";
+import { toast } from "sonner";
 import { CheckCircle2, Circle, AlertCircle, FileDown, ListChecks, RefreshCw } from "lucide-react";
 
 const CARD_CLASS =
@@ -275,7 +276,6 @@ export default function SwmpPage() {
   const [strategySectionLoading, setStrategySectionLoading] = useState(false);
   const [forecastSectionLoading, setForecastSectionLoading] = useState(false);
   const [strategyError, setStrategyError] = useState<string | null>(null);
-  const [conversionFactorsConfigured, setConversionFactorsConfigured] = useState<boolean | null>(null);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
 
   const [optimiserData, setOptimiserData] = useState<{
@@ -298,6 +298,8 @@ export default function SwmpPage() {
     sort: "tonnes",
   });
   const [streamsViewMode, setStreamsViewMode] = useState<"cards" | "table">("cards");
+  const [pdfDownloading, setPdfDownloading] = useState(false);
+  const [pdfFallbackModalOpen, setPdfFallbackModalOpen] = useState(false);
 
   useEffect(() => {
     try {
@@ -464,13 +466,6 @@ export default function SwmpPage() {
         .then((body: { isSuperAdmin?: boolean }) => {
           if (!mounted) return;
           if (typeof body?.isSuperAdmin === "boolean") setIsSuperAdmin(body.isSuperAdmin);
-        })
-        .catch(() => {});
-      fetch("/api/conversion-factors-status", { credentials: "include" })
-        .then((r) => r.json())
-        .then((body: { configured?: boolean }) => {
-          if (!mounted) return;
-          if (typeof body?.configured === "boolean") setConversionFactorsConfigured(body.configured);
         })
         .catch(() => {});
       setLoading(false);
@@ -789,17 +784,79 @@ export default function SwmpPage() {
                   {swmp ? "Ready" : "Needs attention"}
                 </Badge>
                 {swmp && (
-                  <Button size="sm" asChild>
-                    <Link href={`/projects/${projectId}/swmp?export=1`}>
+                  <>
+                    <Button size="sm" variant="outline" asChild>
+                      <Link href={`/projects/${projectId}/swmp?export=1`}>
+                        <FileDown className="size-4 mr-2" />
+                        View print layout
+                      </Link>
+                    </Button>
+                    <Button
+                      size="sm"
+                      disabled={pdfDownloading}
+                      onClick={async () => {
+                        if (!projectId) return;
+                        setPdfDownloading(true);
+                        try {
+                          const res = await fetch(`/api/report/pdf?projectId=${encodeURIComponent(projectId)}`, {
+                            credentials: "include",
+                          });
+                          if (!res.ok) {
+                            const b = await res.json().catch(() => ({})) as { error?: string; code?: string };
+                            if (b.code === "PLAYWRIGHT_NOT_INSTALLED" || (b.error && (b.error.includes("not configured") || b.error.includes("playwright install")))) {
+                              setPdfFallbackModalOpen(true);
+                              return;
+                            }
+                            throw new Error(b.error ?? "PDF failed");
+                          }
+                          const blob = await res.blob();
+                          const url = URL.createObjectURL(blob);
+                          const a = document.createElement("a");
+                          a.href = url;
+                          a.download = `SWMP-${projectId.slice(0, 8)}.pdf`;
+                          a.click();
+                          URL.revokeObjectURL(url);
+                          toast.success("PDF downloaded");
+                        } catch (e) {
+                          toast.error(e instanceof Error ? e.message : "PDF download failed");
+                        } finally {
+                          setPdfDownloading(false);
+                        }
+                      }}
+                    >
                       <FileDown className="size-4 mr-2" />
-                      Download
-                    </Link>
-                  </Button>
+                      {pdfDownloading ? "Generating…" : "Download PDF"}
+                    </Button>
+                  </>
                 )}
               </div>
             </div>
           </div>
         </div>
+
+        <Dialog open={pdfFallbackModalOpen} onOpenChange={setPdfFallbackModalOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>PDF engine missing</DialogTitle>
+            </DialogHeader>
+            <p className="text-sm text-muted-foreground">
+              PDF export is not configured on this environment. Use Print → Save as PDF instead.
+            </p>
+            <div className="flex flex-wrap gap-2 pt-2">
+              <Button
+                onClick={() => {
+                  if (projectId) window.open(`/projects/${projectId}/report/export`, "_blank");
+                  setPdfFallbackModalOpen(false);
+                }}
+              >
+                Open print view
+              </Button>
+              <Button variant="outline" onClick={() => setPdfFallbackModalOpen(false)}>
+                Close
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
 
         <ReportSectionHeader
           currentSection={validSection}
@@ -807,11 +864,26 @@ export default function SwmpPage() {
           onExportClick={() => setExportMode(!exportMode)}
         />
 
-        {conversionFactorsConfigured === false && (
+        {((wasteStrategy?.conversionsUsed?.usedFallback) ||
+          (wasteStrategy?.conversionsUsed?.fallbackCount ?? 0) > 0) && (
           <Alert className="max-w-5xl mx-auto px-4 mb-4 border-amber-200 bg-amber-50/80 dark:border-amber-900/50 dark:bg-amber-950/30 print:hidden">
             <AlertTitle className="text-amber-800 dark:text-amber-200">Note</AlertTitle>
             <AlertDescription>
-              Conversion factors not configured — using waste stream defaults.
+              <span className="block mb-1">
+                Some streams used default density values. Configure conversion factors in{" "}
+                <Link href="/admin/conversions" className="underline font-medium">
+                  Management → Conversion factors
+                </Link>
+                .
+              </span>
+              {wasteStrategy?.conversionsUsed?.missingKeys?.length ? (
+                <span className="text-sm">
+                  Affected streams:{" "}
+                  {wasteStrategy.conversionsUsed.missingKeys.slice(0, 5).join(", ")}
+                  {wasteStrategy.conversionsUsed.missingKeys.length > 5 &&
+                    ` and ${wasteStrategy.conversionsUsed.missingKeys.length - 5} more`}
+                </span>
+              ) : null}
             </AlertDescription>
           </Alert>
         )}

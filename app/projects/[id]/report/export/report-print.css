@@ -1,0 +1,257 @@
+/* Print layout for Report PDF export. Loaded only on /report/export. */
+
+/* Page geometry: apply on export route so layout is correct for Playwright PDF */
+html.report-export-page,
+html.report-export-page body {
+  width: 210mm;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html.report-export-page *,
+html.report-export-page *::before,
+html.report-export-page *::after {
+  box-sizing: border-box;
+}
+
+@page {
+  size: A4;
+  margin: 16mm;
+}
+
+@media print {
+  html,
+  body {
+    width: 210mm !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #fff !important;
+    color: #111 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Printable content width: 210 - 16*2 = 178mm */
+  .print-container {
+    max-width: 178mm;
+    margin: 0 auto;
+    padding: 0;
+  }
+
+  .report-print-document {
+    overflow-x: hidden;
+    max-width: 100%;
+  }
+
+  /* Print document typography: universal, readable scale */
+  .print-doc {
+    font-size: 12.5px;
+    line-height: 1.45;
+    color: #111;
+  }
+
+  .print-doc .report-h1 {
+    font-size: 24px;
+    font-weight: 600;
+    line-height: 1.25;
+    margin: 0 0 0.5em;
+    color: #111;
+  }
+
+  .print-doc .report-h2 {
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 1.3;
+    margin: 1.5em 0 0.5em;
+    padding-bottom: 0.25em;
+    border-bottom: 1px solid #e5e7eb;
+    color: #111;
+  }
+
+  .print-doc .report-h3 {
+    font-size: 13.5px;
+    font-weight: 600;
+    margin: 0.75em 0 0.25em;
+    color: #111;
+  }
+
+  .print-doc .report-body,
+  .print-doc .section-body {
+    font-size: 12.5px;
+    line-height: 1.5;
+    margin: 0 0 0.5em;
+    color: #111;
+  }
+
+  .print-doc .report-section {
+    margin-bottom: 1em;
+  }
+
+  /* Labels/captions only: small/muted */
+  .print-doc .print-muted {
+    font-size: 10.5px;
+    line-height: 1.4;
+    color: #6b7280;
+  }
+
+  /* Narrative lists: consistent spacing */
+  .print-doc .section-body ul,
+  .print-doc .report-section ul,
+  .print-doc .narrative-list {
+    margin-top: 6px;
+    margin-bottom: 0.5em;
+    padding-left: 18px;
+  }
+
+  .print-doc .section-body li,
+  .print-doc .report-section li,
+  .print-doc .narrative-list li {
+    margin-bottom: 3px;
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: #111;
+  }
+
+  /* Responsibilities: role heading + bullets + spacing */
+  .print-doc .responsibility-block {
+    margin-bottom: 12px;
+  }
+
+  .print-doc .responsibility-block:last-child {
+    margin-bottom: 0;
+  }
+
+  .print-doc .responsibility-role {
+    font-size: 13.5px;
+    font-weight: 600;
+    line-height: 1.4;
+    margin: 0 0 4px;
+    color: #111;
+  }
+
+  .print-doc .responsibility-list {
+    margin-top: 6px;
+    padding-left: 18px;
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: #111;
+  }
+
+  .print-doc .responsibility-list li {
+    margin-bottom: 3px;
+  }
+
+  .print-doc .responsibility-contact {
+    font-size: 11px;
+    color: #6b7280;
+    margin: 2px 0 4px;
+  }
+
+  .page-break {
+    break-before: page;
+    page-break-before: always;
+  }
+
+  .page-break-avoid {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* No fixed/sticky in print */
+  [style*="position: fixed"],
+  [style*="position: sticky"] {
+    position: static !important;
+  }
+
+  /* Cover brand strip: logos constrained, no overlap */
+  .cover-brand-strip img {
+    object-fit: contain;
+    max-width: 120px;
+    height: 48px;
+  }
+
+  /* Charts: each in own frame, no overlap */
+  .chart-block {
+    margin-bottom: 1.5em;
+    page-break-inside: avoid;
+  }
+
+  .chart-frame {
+    width: 100%;
+    height: 260px;
+    min-height: 260px;
+    position: relative;
+    page-break-inside: avoid;
+    overflow: visible;
+  }
+
+  .chart-frame svg {
+    overflow: visible;
+  }
+
+  /* Chart card: no overflow hidden so SVG is visible; inner pie fills frame */
+  .report-print-document .print-chart-card {
+    border: none;
+    box-shadow: none;
+    padding: 0;
+    margin: 0;
+    background: transparent;
+    overflow: visible !important;
+  }
+
+  .report-print-document .print-chart-card [class*="overflow-hidden"] {
+    overflow: visible !important;
+  }
+
+  .report-print-document .chart-frame .waste-chart-pie {
+    height: 100% !important;
+    min-height: 200px;
+  }
+
+  /* Export chart cards: hide header (title passed as section heading) so chart gets full height */
+  .report-print-document .print-chart-card > [data-slot="card-header"] {
+    display: none;
+  }
+
+  /* Tables: fixed layout, repeat headers */
+  .print-table-wrap {
+    overflow: visible !important;
+    max-width: 100% !important;
+  }
+
+  .print-table-wrap table {
+    table-layout: fixed;
+    width: 100%;
+    font-size: 11px;
+  }
+
+  .print-table-wrap thead {
+    display: table-header-group;
+  }
+
+  .print-table-wrap tfoot {
+    display: table-footer-group;
+  }
+
+  .print-table-wrap th,
+  .print-table-wrap td {
+    overflow-wrap: break-word;
+    word-break: break-word;
+    padding: 8px 6px;
+    vertical-align: top;
+  }
+
+  .print-table-wrap .cell-destination {
+    max-width: 140px;
+  }
+
+  /* Section spacing */
+  .report-print-document section {
+    margin-top: 0;
+  }
+
+  .report-print-document section.section-spacing {
+    margin-top: 1.5em;
+  }
+}

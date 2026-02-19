@@ -8,6 +8,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Check, AlertCircle, Circle, ChevronDown, ClipboardCheck } from "lucide-react";
+import { InfoTip } from "@/components/inputs/info-tip";
 import { cn } from "@/lib/utils";
 import type { BuilderStepProgress } from "@/lib/swmpBuilder";
 import { STEP_SECTION_IDS, type BuilderStepId } from "@/lib/swmpBuilder";
@@ -111,17 +112,24 @@ export function BuilderHeader({
           Continue
         </Button>
         {showApplyTemplate && (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={onApplyTemplate}
-            disabled={applyTemplateDisabled}
-            className="gap-1.5"
-          >
-            <ClipboardCheck className="size-4 shrink-0" aria-hidden />
-            Apply recommended content
-          </Button>
+          <span className="inline-flex items-center gap-1.5">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={onApplyTemplate}
+              disabled={applyTemplateDisabled}
+              className="gap-1.5"
+            >
+              <ClipboardCheck className="size-4 shrink-0" aria-hidden />
+              Apply recommended content
+            </Button>
+            <InfoTip
+              label="Apply recommended content help"
+              content="Fills blank text only (site controls, monitoring, responsibilities, notes). Doesn’t overwrite anything you’ve already entered."
+              variant="tooltip"
+            />
+          </span>
         )}
         <Popover>
           <PopoverTrigger asChild>

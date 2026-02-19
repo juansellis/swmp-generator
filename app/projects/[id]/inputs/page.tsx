@@ -221,6 +221,21 @@ const PROJECT_TYPE_DEFAULT_STREAMS: Record<string, string[]> = {
     "Glass",
     "Mixed C&D",
   ],
+  "Commercial Build": [
+    "Mixed C&D",
+    "Timber (untreated)",
+    "Timber (treated)",
+    "Plasterboard / GIB",
+    "Metals",
+    "Cardboard",
+    "Soft plastics (wrap/strapping)",
+    "Hard plastics",
+    "Insulation",
+    "Concrete / masonry",
+    "Carpet / carpet tiles",
+    "E-waste (cables/lighting/appliances)",
+    "Glass",
+  ],
 };
 
 /** Build default plan for a stream when applying project type template (quantity left empty). */
@@ -339,6 +354,7 @@ import { BuilderProgressRail } from "@/components/inputs/builder-progress-rail";
 import { ProjectStatusPills } from "@/components/project-status-pills";
 import { StickyActionBar } from "@/components/sticky-action-bar";
 import { SmartHint } from "@/components/smart-hint";
+import { InfoTip } from "@/components/inputs/info-tip";
 import { Skeleton } from "@/components/ui/skeleton";
 
 const DEFAULT_STATUS: ProjectStatusData = {
@@ -699,6 +715,8 @@ export default function ProjectInputsPage() {
   const [appliedTemplateLabel, setAppliedTemplateLabel] = useState<string | null>(null);
   /** Preserve scroll position across autosave so changing facility/destination doesn’t jump to top. */
   const scrollPositionBeforeSaveRef = useRef<number | null>(null);
+  /** After "Add role", focus the new (top) additional role's name field. */
+  const focusNewAdditionalRoleRef = useRef(false);
 
   const hazards = useMemo(() => {
     return {
@@ -714,15 +732,14 @@ export default function ProjectInputsPage() {
     let mounted = true;
 
     (async () => {
-      setLoading(true);
-      setPageError(null);
-
       let project: ProjectRow | null = null;
 
       // 1️⃣ Use project from layout context when available (e.g. after switching from Forecast tab) to avoid refetch
       if (projectContext?.project?.id === projectId) {
         project = projectContext.project as ProjectRow;
         setProject(project);
+        // Do NOT setLoading(true) here: we already have the project (e.g. after autosave updated context).
+        // Showing the loading skeleton would remount the form and jump scroll to top.
         const shouldHydrateProjectDetails =
           lastHydratedProjectIdRef.current !== projectId || !projectDetailsDirtyRef.current;
         if (shouldHydrateProjectDetails) {
@@ -757,6 +774,9 @@ export default function ProjectInputsPage() {
           setPrimaryWasteContractorPartnerId(toUuidOrNull((project as ProjectRow).primary_waste_contractor_partner_id) ?? null);
         }
       } else {
+        setLoading(true);
+        setPageError(null);
+
         const { data: projectData, error: projectErr } = await supabase
           .from("projects")
           .select(PROJECT_SELECT_FIELDS)
@@ -2304,7 +2324,16 @@ export default function ProjectInputsPage() {
               <InputsSectionCard
                 id="waste-streams"
                 icon={<Recycle className="size-5" />}
-                title="Waste streams"
+                title={
+                  <span className="inline-flex items-center gap-1.5">
+                    Waste streams
+                    <InfoTip
+                      label="Waste streams help"
+                      content="A waste stream is a type of material (e.g. Mixed C&D, timber, plasterboard). Tonnes you enter drive diversion % and the SWMP report."
+                      variant="tooltip"
+                    />
+                  </span>
+                }
                 description="Select streams, set quantities, disposal method, and destination per stream."
                 whyMatters="Core data for diversion calculations and the generated SWMP."
                 accent="green"
@@ -2624,8 +2653,26 @@ export default function ProjectInputsPage() {
                       <tr className="border-b border-border bg-muted/50">
                         <th className="text-left font-medium px-4 py-3">Stream</th>
                         <th className="text-left font-medium px-4 py-3 w-28">Planned tonnes</th>
-                        <th className="text-left font-medium px-4 py-3 min-w-[140px]">Disposal method</th>
-                        <th className="text-left font-medium px-4 py-3 min-w-[160px]">Destination / facility</th>
+                        <th className="text-left font-medium px-4 py-3 min-w-[140px]">
+                          <span className="inline-flex items-center gap-1.5">
+                            Disposal method
+                            <InfoTip
+                              label="Disposal method help"
+                              content="How each stream is disposed (e.g. Recycle, Landfill). Affects diversion % and reporting."
+                              variant="tooltip"
+                            />
+                          </span>
+                        </th>
+                        <th className="text-left font-medium px-4 py-3 min-w-[160px]">
+                          <span className="inline-flex items-center gap-1.5">
+                            Destination / facility
+                            <InfoTip
+                              label="Destination help"
+                              content="Where the waste goes. Used for distance, optimiser, and the report. Set per stream."
+                              variant="tooltip"
+                            />
+                          </span>
+                        </th>
                         <th className="text-left font-medium px-4 py-3 w-28">Status</th>
                         <th className="w-20 px-4 py-3"></th>
                       </tr>
@@ -3599,9 +3646,16 @@ export default function ProjectInputsPage() {
                   </span>
                 </AccordionTrigger>
                 <AccordionContent className="px-4 pb-4">
-                  <div className="space-y-6">
+                    <div className="space-y-6">
                     <div className="flex flex-wrap items-center gap-4">
-                      <Label className="text-sm font-medium">Monitoring & reporting cadence</Label>
+                      <span className="inline-flex items-center gap-1.5">
+                        <Label className="text-sm font-medium">Monitoring & reporting cadence</Label>
+                        <InfoTip
+                          label="Reporting cadence help"
+                          content="How often you’ll report waste data. Sets expectations for dockets and tracking."
+                          variant="tooltip"
+                        />
+                      </span>
                       <Select
                         value={reportingCadence}
                         onValueChange={(v) => setReportingCadence(v as any)}
@@ -3775,7 +3829,14 @@ export default function ProjectInputsPage() {
               <AccordionItem value="responsibilities" className="border border-border/50 rounded-lg px-0 mb-2 overflow-hidden">
                 <AccordionTrigger className="w-full px-4 py-4 bg-muted/40 hover:bg-muted/60 transition-colors [&[data-state=open]]:bg-muted/60 rounded-t-lg data-[state=open]:rounded-b-none [&>svg]:shrink-0">
                   <span className="flex flex-col items-start text-left gap-0.5">
-                    <span className="font-semibold text-lg">Responsibilities</span>
+                    <span className="font-semibold text-lg inline-flex items-center gap-1.5">
+                      Responsibilities
+                      <InfoTip
+                        label="Responsibilities help"
+                        content="Roles and parties listed here appear in the final SWMP document. Add or edit as needed."
+                        variant="tooltip"
+                      />
+                    </span>
                     <span className="text-sm font-normal text-muted-foreground">
                       {3 + additionalResponsibilities.length} people
                     </span>
@@ -3789,9 +3850,10 @@ export default function ProjectInputsPage() {
                         type="button"
                         variant="outline"
                         size="sm"
-                        onClick={() =>
-                          setAdditionalResponsibilities((prev) => [...prev, { name: "", role: "", responsibilities: "" }])
-                        }
+                        onClick={() => {
+                          setAdditionalResponsibilities((prev) => [{ name: "", role: "", responsibilities: "" }, ...prev]);
+                          focusNewAdditionalRoleRef.current = true;
+                        }}
                         disabled={saveLoading}
                       >
                         + Add role
@@ -3835,7 +3897,7 @@ export default function ProjectInputsPage() {
                         <p className="text-sm font-medium text-muted-foreground">Additional people</p>
                         {additionalResponsibilities.map((a, idx) => (
                           <div key={idx} className="rounded-lg border border-border/50 overflow-hidden bg-card">
-                            <Accordion type="single" collapsible defaultValue="" className="w-full">
+                            <Accordion type="single" collapsible defaultValue={idx === 0 ? "additional" : ""} className="w-full">
                               <AccordionItem value="additional" className="border-0">
                                 <AccordionTrigger className="px-4 py-3 hover:no-underline [&>svg]:shrink-0">
                                   <span className="flex items-center justify-between w-full pr-2">
@@ -3864,6 +3926,12 @@ export default function ProjectInputsPage() {
                                     <div className="space-y-2">
                                       <Label className="text-sm font-medium">Name</Label>
                                       <Input
+                                        ref={(el) => {
+                                          if (idx === 0 && el && focusNewAdditionalRoleRef.current) {
+                                            focusNewAdditionalRoleRef.current = false;
+                                            requestAnimationFrame(() => el.focus());
+                                          }
+                                        }}
                                         value={a.name}
                                         onChange={(e) =>
                                           setAdditionalResponsibilities((prev) =>

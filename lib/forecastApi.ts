@@ -86,6 +86,42 @@ export async function getConversionOptions(
   }
   return map;
 }
+
+/**
+ * Returns the set of waste stream names that have at least one active conversion factor.
+ * Used to detect when report calculations used fallback (stream default) instead of configured factors.
+ */
+export async function getStreamsWithConfiguredFactors(
+  supabase: SupabaseClient
+): Promise<Set<string>> {
+  const { data: factors, error: factorsErr } = await supabase
+    .from("conversion_factors")
+    .select("waste_stream_id")
+    .eq("is_active", true);
+
+  if (factorsErr?.message?.includes(CONVERSION_FACTORS_TABLE_MISSING) || !factors?.length) {
+    return new Set();
+  }
+
+  const ids = [...new Set((factors as { waste_stream_id: string }[]).map((r) => r.waste_stream_id))];
+  if (ids.length === 0) return new Set();
+
+  const { data: streams, error: streamsErr } = await supabase
+    .from("waste_streams")
+    .select("id, name")
+    .in("id", ids)
+    .eq("is_active", true);
+
+  if (streamsErr || !streams?.length) return new Set();
+
+  const names = new Set<string>();
+  for (const s of streams as { id: string; name: string }[]) {
+    const name = (s.name ?? "").trim();
+    if (name) names.add(name);
+  }
+  return names;
+}
+
 import { applyForecastToInputs, computeForecastTotalsByStream } from "@/lib/forecastAllocation";
 import { defaultSwmpInputs, normalizeSwmpInputs, SWMP_INPUTS_JSON_COLUMN } from "@/lib/swmp/schema";
 
