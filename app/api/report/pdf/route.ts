@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createReportExportToken } from "@/lib/reportPdfToken";
+import type { Browser } from "playwright-core";
 
 function escapeHtml(s: string): string {
   return s
@@ -15,7 +16,7 @@ export const maxDuration = 60;
 
 /**
  * GET /api/report/pdf?projectId=xxx
- * Generates a PDF of the report for the given project using Playwright.
+ * Generates a PDF of the report using serverless Chromium (@sparticuz/chromium + playwright-core).
  * Requires auth; user must own the project. Returns application/pdf.
  */
 export async function GET(req: Request) {
@@ -49,18 +50,24 @@ export async function GET(req: Request) {
 
   const baseUrl =
     process.env.NEXT_PUBLIC_APP_URL ||
+    process.env.NEXT_PUBLIC_SITE_URL ||
     (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null) ||
     new URL(req.url).origin;
 
   const token = createReportExportToken(projectId);
   const exportUrl = `${baseUrl}/projects/${projectId}/report/export?token=${encodeURIComponent(token)}`;
 
-  try {
-    const { chromium } = await import("playwright");
+  let browser: Browser | null = null;
 
-    const browser = await chromium.launch({
+  try {
+    const chromiumPkg = await import("@sparticuz/chromium");
+    const chrom = (chromiumPkg as { default: { args: string[]; executablePath: () => Promise<string> } }).default;
+    const { chromium: playwrightChromium } = await import("playwright-core");
+
+    browser = await playwrightChromium.launch({
+      args: chrom.args,
+      executablePath: await chrom.executablePath(),
       headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--single-process"],
     });
 
     const context = await browser.newContext({
@@ -96,6 +103,7 @@ export async function GET(req: Request) {
     });
 
     await browser.close();
+    browser = null;
 
     return new NextResponse(new Uint8Array(pdfBuffer), {
       status: 200,
@@ -107,21 +115,17 @@ export async function GET(req: Request) {
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "PDF generation failed";
-    const isPlaywrightMissing =
-      typeof message === "string" &&
-      (message.includes("Executable doesn't exist") ||
-        message.includes("playwright install") ||
-        message.includes("browserType.launch"));
-    if (isPlaywrightMissing) {
-      return NextResponse.json(
-        {
-          error:
-            "PDF export is not configured on this environment. Run `npx playwright install`.",
-          code: "PLAYWRIGHT_NOT_INSTALLED",
-        },
-        { status: 503 }
-      );
+    console.error("[report/pdf] PDF generation failed:", message);
+    if (browser) {
+      try {
+        await browser.close();
+      } catch {
+        // ignore
+      }
     }
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json(
+      { error: "PDF generation failed. Please try again or use Print → Save as PDF." },
+      { status: 500 }
+    );
   }
 }

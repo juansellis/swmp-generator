@@ -33,12 +33,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
   Select,
   SelectContent,
   SelectItem,
@@ -299,7 +293,6 @@ export default function SwmpPage() {
   });
   const [streamsViewMode, setStreamsViewMode] = useState<"cards" | "table">("cards");
   const [pdfDownloading, setPdfDownloading] = useState(false);
-  const [pdfFallbackModalOpen, setPdfFallbackModalOpen] = useState(false);
 
   useEffect(() => {
     try {
@@ -802,11 +795,7 @@ export default function SwmpPage() {
                             credentials: "include",
                           });
                           if (!res.ok) {
-                            const b = await res.json().catch(() => ({})) as { error?: string; code?: string };
-                            if (b.code === "PLAYWRIGHT_NOT_INSTALLED" || (b.error && (b.error.includes("not configured") || b.error.includes("playwright install")))) {
-                              setPdfFallbackModalOpen(true);
-                              return;
-                            }
+                            const b = await res.json().catch(() => ({})) as { error?: string };
                             throw new Error(b.error ?? "PDF failed");
                           }
                           const blob = await res.blob();
@@ -833,30 +822,6 @@ export default function SwmpPage() {
             </div>
           </div>
         </div>
-
-        <Dialog open={pdfFallbackModalOpen} onOpenChange={setPdfFallbackModalOpen}>
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle>PDF engine missing</DialogTitle>
-            </DialogHeader>
-            <p className="text-sm text-muted-foreground">
-              PDF export is not configured on this environment. Use Print → Save as PDF instead.
-            </p>
-            <div className="flex flex-wrap gap-2 pt-2">
-              <Button
-                onClick={() => {
-                  if (projectId) window.open(`/projects/${projectId}/report/export`, "_blank");
-                  setPdfFallbackModalOpen(false);
-                }}
-              >
-                Open print view
-              </Button>
-              <Button variant="outline" onClick={() => setPdfFallbackModalOpen(false)}>
-                Close
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
 
         <ReportSectionHeader
           currentSection={validSection}
