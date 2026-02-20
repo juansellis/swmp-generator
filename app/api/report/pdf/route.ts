@@ -16,8 +16,9 @@ export const maxDuration = 60;
 
 /**
  * GET /api/report/pdf?projectId=xxx
- * Generates a PDF of the report using serverless Chromium (@sparticuz/chromium + playwright-core).
- * Requires auth; user must own the project. Returns application/pdf.
+ * EXPERIMENTAL: Server-side PDF via Playwright/Chromium. Not used by the default export flow.
+ * Default export uses Print View (/projects/[id]/report/print) + browser Print → Save as PDF.
+ * Requires auth; user must own the project. Returns application/pdf when Chromium is available.
  */
 export async function GET(req: Request) {
   const url = new URL(req.url);

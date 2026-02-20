@@ -12,6 +12,7 @@ const ADMIN_NAV = [
   { href: "/admin/facilities", label: "Facilities" },
   { href: "/admin/materials", label: "Waste Streams" },
   { href: "/admin/conversions", label: "Conversion factors" },
+  { href: "/admin/carbon", label: "Carbon factors" },
   { href: "/admin/users", label: "Users" },
 ] as const;
 

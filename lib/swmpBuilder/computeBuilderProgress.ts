@@ -1,7 +1,7 @@
 /**
  * Progress engine for the Guided SWMP Builder.
  * Returns completion status per step and which step is recommended next.
- * Step 4 (Resource inputs) is optional and never blocks progress.
+ * Resource inputs step is optional and never blocks progress.
  */
 
 import { BUILDER_STEPS, type BuilderStepId } from "./builderConfig";
@@ -87,12 +87,14 @@ function hasMonitoringEvidence(monitoring: BuilderProgressInput["monitoring"]): 
 
 /**
  * Compute per-step status and the recommended next step.
- * - Project basics: project_type, region, site address validated, start_date
- * - Waste streams: at least 1 stream, at least 1 with planned tonnes > 0
- * - Facilities: every planned stream has facility/destination
- * - Resource inputs: optional (never blocks; always "complete" for next-step chain)
+ * All completion checks keyed by step id (no index-based logic).
+ * - Project details: project_type, region, site address validated, start_date
+ * - Facilities: primary contractor and/or every planned stream has facility/destination
+ * - Site constraints: at least one constraint selected (optional for flow; counts when set)
+ * - Waste streams: at least 1 stream, planned tonnes, disposal, destination per stream
+ * - Resource inputs: optional (never blocks; always complete for next-step chain)
  * - Monitoring: cadence selected + (at least 1 evidence type OR uses software)
- * - Review: ready when 1–5 satisfied (review counts as complete when others done)
+ * - Review: ready when 1–6 satisfied (review counts as complete when others done)
  */
 export function computeBuilderProgress(inputs: BuilderProgressInput): BuilderStepProgress[] {
   const basicsComplete =
@@ -101,17 +103,19 @@ export function computeBuilderProgress(inputs: BuilderProgressInput): BuilderSte
     inputs.siteAddressValidated === true &&
     !isEmptyString(inputs.startDate);
 
-  const streamsComplete =
-    (inputs.wasteStreamsCount ?? 0) > 0 &&
-    (inputs.hasPlannedTonnes === true) &&
-    (inputs.allStreamsHaveDestination === true) &&
-    (inputs.allStreamsHaveDisposal === true);
-
   const hasStreams = (inputs.wasteStreamsCount ?? 0) > 0;
   const facilitiesComplete =
     (hasStreams && inputs.allStreamsHaveDestination === true) ||
-    !isEmptyString(inputs.primaryWasteContractorPartnerId) ||
-    (Array.isArray(inputs.constraints) && inputs.constraints.length > 0);
+    !isEmptyString(inputs.primaryWasteContractorPartnerId);
+
+  const siteConstraintsComplete =
+    Array.isArray(inputs.constraints) && inputs.constraints.length > 0;
+
+  const streamsComplete =
+    hasStreams &&
+    (inputs.hasPlannedTonnes === true) &&
+    (inputs.allStreamsHaveDestination === true) &&
+    (inputs.allStreamsHaveDisposal === true);
 
   const resourceInputsComplete = true;
 
@@ -123,8 +127,9 @@ export function computeBuilderProgress(inputs: BuilderProgressInput): BuilderSte
 
   const completion: Record<BuilderStepId, boolean> = {
     basics: basicsComplete,
-    streams: streamsComplete,
     facilities: facilitiesComplete,
+    siteConstraints: siteConstraintsComplete,
+    streams: streamsComplete,
     resourceInputs: resourceInputsComplete,
     monitoring: monitoringComplete,
     review: reviewComplete,

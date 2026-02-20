@@ -14,7 +14,6 @@ import type { BuilderStepProgress } from "@/lib/swmpBuilder";
 import { STEP_SECTION_IDS, type BuilderStepId } from "@/lib/swmpBuilder";
 
 const STICKY_TOP_OFFSET = 96;
-const TOTAL_STEPS = 6;
 
 function scrollToSection(sectionId: string) {
   const el = document.getElementById(sectionId);
@@ -62,8 +61,9 @@ export function BuilderHeader({
     scrollToSection(STEP_SECTION_IDS[stepId]);
   };
 
-  const value = Math.min(TOTAL_STEPS, Math.max(0, completeCount));
-  const pct = TOTAL_STEPS > 0 ? (value / TOTAL_STEPS) * 100 : 0;
+  const totalSteps = progress.length;
+  const value = Math.min(totalSteps, Math.max(0, completeCount));
+  const pct = totalSteps > 0 ? (value / totalSteps) * 100 : 0;
 
   return (
     <div
@@ -79,15 +79,15 @@ export function BuilderHeader({
       <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
         <div className="flex items-center gap-3">
           <span className="text-sm font-medium tabular-nums text-foreground">
-            {completeCount}/{TOTAL_STEPS} complete
+            {completeCount}/{totalSteps} complete
           </span>
           <div
             className="h-1.5 flex-1 min-w-[80px] max-w-[120px] overflow-hidden rounded-full bg-muted"
             role="progressbar"
             aria-valuenow={value}
             aria-valuemin={0}
-            aria-valuemax={TOTAL_STEPS}
-            aria-label={`${completeCount} of ${TOTAL_STEPS} steps complete`}
+            aria-valuemax={totalSteps}
+            aria-label={`${completeCount} of ${totalSteps} steps complete`}
           >
             <div
               className="h-full rounded-full bg-primary transition-all duration-300"

@@ -111,6 +111,29 @@ type ForecastItemRow = {
   computed_waste_kg?: number | null;
 };
 
+/** Carbon report data from /api/projects/[id]/report-carbon (same shape as report-export). */
+type CarbonVehicleEntry = {
+  id: string;
+  factor_id: string;
+  time_active_hours: number;
+  notes: string | null;
+  factor: {
+    name: string;
+    weight_range: string | null;
+    fuel_type: string;
+    avg_consumption_per_hr: number;
+    consumption_unit: string;
+    conversion_factor_kgco2e_per_unit: number;
+  };
+};
+type CarbonResourceEntry = {
+  id: string;
+  factor_id: string;
+  quantity_used: number;
+  notes: string | null;
+  factor: { category: string; name: string; unit: string; conversion_factor_kgco2e_per_unit: number };
+};
+
 function RecommendationDetail({
   rec,
   projectId,
@@ -292,7 +315,9 @@ export default function SwmpPage() {
     sort: "tonnes",
   });
   const [streamsViewMode, setStreamsViewMode] = useState<"cards" | "table">("cards");
-  const [pdfDownloading, setPdfDownloading] = useState(false);
+  const [carbonVehicleEntries, setCarbonVehicleEntries] = useState<CarbonVehicleEntry[]>([]);
+  const [carbonResourceEntries, setCarbonResourceEntries] = useState<CarbonResourceEntry[]>([]);
+  const [carbonLoading, setCarbonLoading] = useState(false);
 
   useEffect(() => {
     try {
@@ -391,6 +416,22 @@ export default function SwmpPage() {
     setForecastItems(data.items ?? []);
   }, []);
 
+  const fetchCarbonReport = useCallback(async (id: string) => {
+    setCarbonLoading(true);
+    try {
+      const res = await fetch(`/api/projects/${id}/report-carbon`, { credentials: "include" });
+      if (!res.ok) return;
+      const data = (await res.json()) as {
+        carbonVehicleEntries?: CarbonVehicleEntry[];
+        carbonResourceEntries?: CarbonResourceEntry[];
+      };
+      setCarbonVehicleEntries(data.carbonVehicleEntries ?? []);
+      setCarbonResourceEntries(data.carbonResourceEntries ?? []);
+    } finally {
+      setCarbonLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     let mounted = true;
 
@@ -402,6 +443,8 @@ export default function SwmpPage() {
       setStrategyError(null);
       setForecastItems([]);
       setPlanningChecklist(null);
+      setCarbonVehicleEntries([]);
+      setCarbonResourceEntries([]);
 
       const { data: sessionData } = await supabase.auth.getSession();
       if (!sessionData.session) {
@@ -452,6 +495,7 @@ export default function SwmpPage() {
         if (mounted) setForecastSectionLoading(false);
       });
       fetchPlanningChecklist(projectId);
+      fetchCarbonReport(projectId);
       fetchDistanceStatus(projectId);
       fetchFacilityOptimiser(projectId);
       fetch("/api/auth/check-admin", { credentials: "include" })
@@ -467,7 +511,7 @@ export default function SwmpPage() {
     return () => {
       mounted = false;
     };
-  }, [router, projectId, fetchWasteStrategy, fetchForecastItems, fetchPlanningChecklist, fetchDistanceStatus, fetchFacilityOptimiser]);
+  }, [router, projectId, fetchWasteStrategy, fetchForecastItems, fetchPlanningChecklist, fetchCarbonReport, fetchDistanceStatus, fetchFacilityOptimiser]);
 
   const chartData = useMemo(
     () => buildWasteChartData(chartInputs),
@@ -725,7 +769,7 @@ export default function SwmpPage() {
     ]
   );
 
-  const validSection = ["overview", "strategy", "streams", "narrative", "appendix"].includes(section)
+  const validSection = ["overview", "strategy", "streams", "narrative", "carbon", "appendix"].includes(section)
     ? section
     : "overview";
 
@@ -779,42 +823,22 @@ export default function SwmpPage() {
                 {swmp && (
                   <>
                     <Button size="sm" variant="outline" asChild>
-                      <Link href={`/projects/${projectId}/swmp?export=1`}>
+                      <Link href={`/projects/${projectId}/report/print`} target="_blank" rel="noopener noreferrer">
                         <FileDown className="size-4 mr-2" />
                         View print layout
                       </Link>
                     </Button>
                     <Button
                       size="sm"
-                      disabled={pdfDownloading}
-                      onClick={async () => {
+                      onClick={() => {
                         if (!projectId) return;
-                        setPdfDownloading(true);
-                        try {
-                          const res = await fetch(`/api/report/pdf?projectId=${encodeURIComponent(projectId)}`, {
-                            credentials: "include",
-                          });
-                          if (!res.ok) {
-                            const b = await res.json().catch(() => ({})) as { error?: string };
-                            throw new Error(b.error ?? "PDF failed");
-                          }
-                          const blob = await res.blob();
-                          const url = URL.createObjectURL(blob);
-                          const a = document.createElement("a");
-                          a.href = url;
-                          a.download = `SWMP-${projectId.slice(0, 8)}.pdf`;
-                          a.click();
-                          URL.revokeObjectURL(url);
-                          toast.success("PDF downloaded");
-                        } catch (e) {
-                          toast.error(e instanceof Error ? e.message : "PDF download failed");
-                        } finally {
-                          setPdfDownloading(false);
-                        }
+                        const printUrl = `/projects/${projectId}/report/print`;
+                        window.open(printUrl, "_blank", "noopener,noreferrer");
+                        toast.success("Print view opened — use Print / Save as PDF in the new tab.");
                       }}
                     >
                       <FileDown className="size-4 mr-2" />
-                      {pdfDownloading ? "Generating…" : "Download PDF"}
+                      Download PDF
                     </Button>
                   </>
                 )}
@@ -826,7 +850,6 @@ export default function SwmpPage() {
         <ReportSectionHeader
           currentSection={validSection}
           exportMode={exportMode}
-          onExportClick={() => setExportMode(!exportMode)}
         />
 
         {((wasteStrategy?.conversionsUsed?.usedFallback) ||
@@ -1020,6 +1043,164 @@ export default function SwmpPage() {
             </div>
               </SectionErrorBoundary>
           </section>
+          )}
+
+          {/* ---------- CARBON FORECAST (site operations) — only on Carbon Forecast tab (or in export/print) ---------- */}
+          {showSection("carbon") && (
+            <section id="outputs-carbon-forecast" className="print:break-before-auto print:break-inside-avoid">
+              <h1 className="text-2xl font-semibold mb-2">Carbon forecast (site operations)</h1>
+              <p className="text-sm text-muted-foreground mb-6">
+                Machinery, vehicles, water, energy and fuel emissions (kg CO₂e).
+              </p>
+              <SectionErrorBoundary sectionId="carbon-forecast">
+                {carbonLoading ? (
+                  <Card className={CARD_CLASS}>
+                    <CardContent className="p-6">
+                      <p className="text-sm text-muted-foreground">Loading carbon data…</p>
+                    </CardContent>
+                  </Card>
+                ) : (carbonVehicleEntries.length > 0 || carbonResourceEntries.length > 0) ? (
+                  <div className={cn(SECTION_SPACE, "print:break-inside-avoid")}>
+                    {carbonVehicleEntries.length > 0 && (
+                      <Card className={CARD_CLASS}>
+                        <CardHeader>
+                          <CardTitle className="text-lg">Machinery &amp; vehicles</CardTitle>
+                        </CardHeader>
+                        <CardContent className="p-0 sm:p-6 sm:pt-0 overflow-x-auto">
+                          <Table>
+                            <TableHeader>
+                              <TableRow className="bg-muted/50">
+                                <TableHead className="break-words">Item</TableHead>
+                                <TableHead className="w-24">Fuel type</TableHead>
+                                <TableHead className="text-right w-20">Time (hrs)</TableHead>
+                                <TableHead className="text-right w-20">Consumption/hr</TableHead>
+                                <TableHead className="w-16">Unit</TableHead>
+                                <TableHead className="text-right w-20">kg CO₂e/unit</TableHead>
+                                <TableHead className="text-right w-24">Emissions (kg CO₂e)</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {carbonVehicleEntries.map((e) => {
+                                const t = Number(e.time_active_hours) || 0;
+                                const c = e.factor?.avg_consumption_per_hr ?? 0;
+                                const k = e.factor?.conversion_factor_kgco2e_per_unit ?? 0;
+                                const emissions = t * c * k;
+                                const itemLabel = [e.factor?.name, e.factor?.weight_range ? `(${e.factor.weight_range})` : ""].filter(Boolean).join(" ");
+                                return (
+                                  <TableRow key={e.id}>
+                                    <TableCell className="break-words">{itemLabel || "—"}</TableCell>
+                                    <TableCell>{e.factor?.fuel_type ?? "—"}</TableCell>
+                                    <TableCell className="text-right tabular-nums">{t.toFixed(2)}</TableCell>
+                                    <TableCell className="text-right tabular-nums">{c}</TableCell>
+                                    <TableCell>{e.factor?.consumption_unit ?? "—"}</TableCell>
+                                    <TableCell className="text-right tabular-nums">{k}</TableCell>
+                                    <TableCell className="text-right tabular-nums">{(Math.round(emissions * 100) / 100).toFixed(2)}</TableCell>
+                                  </TableRow>
+                                );
+                              })}
+                            </TableBody>
+                          </Table>
+                          <div className="border-t bg-muted/30 px-4 py-2 text-right text-sm font-medium">
+                            Machinery subtotal:{" "}
+                            <span className="tabular-nums">
+                              {(
+                                Math.round(
+                                  carbonVehicleEntries.reduce((sum, e) => {
+                                    const t = Number(e.time_active_hours) || 0;
+                                    const c = e.factor?.avg_consumption_per_hr ?? 0;
+                                    const k = e.factor?.conversion_factor_kgco2e_per_unit ?? 0;
+                                    return sum + t * c * k;
+                                  },
+                                  0
+                                ) * 100
+                              ) / 100).toFixed(2)}{" "}
+                              kg CO₂e
+                            </span>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    )}
+                    {carbonResourceEntries.length > 0 && (
+                      <Card className={CARD_CLASS}>
+                        <CardHeader>
+                          <CardTitle className="text-lg">Water, energy &amp; fuel</CardTitle>
+                        </CardHeader>
+                        <CardContent className="p-0 sm:p-6 sm:pt-0 overflow-x-auto">
+                          <Table>
+                            <TableHeader>
+                              <TableRow className="bg-muted/50">
+                                <TableHead className="break-words">Item</TableHead>
+                                <TableHead className="w-20">Category</TableHead>
+                                <TableHead className="text-right w-20">Quantity used</TableHead>
+                                <TableHead className="w-16">Unit</TableHead>
+                                <TableHead className="text-right w-20">kg CO₂e/unit</TableHead>
+                                <TableHead className="text-right w-24">Emissions (kg CO₂e)</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {carbonResourceEntries.map((e) => {
+                                const q = Number(e.quantity_used) || 0;
+                                const k = e.factor?.conversion_factor_kgco2e_per_unit ?? 0;
+                                const emissions = q * k;
+                                return (
+                                  <TableRow key={e.id}>
+                                    <TableCell className="break-words">{e.factor?.name ?? "—"}</TableCell>
+                                    <TableCell>{e.factor?.category ?? "—"}</TableCell>
+                                    <TableCell className="text-right tabular-nums">{q.toFixed(2)}</TableCell>
+                                    <TableCell>{e.factor?.unit ?? "—"}</TableCell>
+                                    <TableCell className="text-right tabular-nums">{k}</TableCell>
+                                    <TableCell className="text-right tabular-nums">{(Math.round(emissions * 100) / 100).toFixed(2)}</TableCell>
+                                  </TableRow>
+                                );
+                              })}
+                            </TableBody>
+                          </Table>
+                          <div className="border-t bg-muted/30 px-4 py-2 text-right text-sm font-medium">
+                            Water/Energy/Fuel subtotal:{" "}
+                            <span className="tabular-nums">
+                              {(
+                                Math.round(
+                                  carbonResourceEntries.reduce((sum, e) => {
+                                    const q = Number(e.quantity_used) || 0;
+                                    const k = e.factor?.conversion_factor_kgco2e_per_unit ?? 0;
+                                    return sum + q * k;
+                                  },
+                                  0
+                                ) * 100
+                              ) / 100).toFixed(2)}{" "}
+                              kg CO₂e
+                            </span>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    )}
+                    {(carbonVehicleEntries.length > 0 || carbonResourceEntries.length > 0) && (
+                      <div className="rounded-lg border border-border bg-muted/30 p-4 print:break-inside-avoid">
+                        <p className="text-sm font-semibold tabular-nums">
+                          Total operational emissions:{" "}
+                          {(
+                            Math.round(
+                              (carbonVehicleEntries.reduce((s, e) => s + (Number(e.time_active_hours) || 0) * (e.factor?.avg_consumption_per_hr ?? 0) * (e.factor?.conversion_factor_kgco2e_per_unit ?? 0), 0) +
+                                carbonResourceEntries.reduce((s, e) => s + (Number(e.quantity_used) || 0) * (e.factor?.conversion_factor_kgco2e_per_unit ?? 0), 0)) *
+                              100
+                            ) / 100
+                          ).toFixed(2)}{" "}
+                          kg CO₂e
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <Card className={CARD_CLASS}>
+                    <CardContent className="p-6">
+                      <p className="text-sm text-muted-foreground">
+                        No carbon data yet. Add machinery, vehicles, water, energy and fuel entries in the project Carbon Forecast tab to see emissions here.
+                      </p>
+                    </CardContent>
+                  </Card>
+                )}
+              </SectionErrorBoundary>
+            </section>
           )}
 
           {/* ---------- STRATEGY ---------- */}

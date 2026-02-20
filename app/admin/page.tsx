@@ -12,6 +12,7 @@ type AdminStats = {
   facilities: number;
   materials: number;
   conversions: number;
+  carbon: number;
   users: number;
 };
 
@@ -20,6 +21,7 @@ const ADMIN_LINKS: { href: string; title: string; description: string; countKey:
   { href: "/admin/facilities", title: "Facilities", description: "Manage facilities (sites) and accepted streams.", countKey: "facilities" },
   { href: "/admin/materials", title: "Waste Streams", description: "Canonical waste streams for Inputs, Facilities, Forecast.", countKey: "materials" },
   { href: "/admin/conversions", title: "Conversion factors", description: "Per-material unit conversion (m, m³ → kg).", countKey: "conversions" },
+  { href: "/admin/carbon", title: "Carbon factors", description: "Machinery/vehicles and water, energy & fuel (kgCO2e).", countKey: "carbon" },
   { href: "/admin/users", title: "Users", description: "View and manage authenticated users.", countKey: "users" },
 ];
 
@@ -47,7 +49,7 @@ export default function AdminOverviewPage() {
         title="Admin"
         subtitle={
           <span>
-            Super Admin: manage partners, facilities, materials, conversions, and users.{" "}
+            Super Admin: manage partners, facilities, materials, conversions, carbon factors, and users.{" "}
             <Badge variant="secondary">Protected</Badge>
           </span>
         }

@@ -1149,8 +1149,9 @@ export default function ProjectInputsPage() {
   const scrollToNextSection = useCallback((currentSectionId: string) => {
     const sectionOrder = [
       "project-overview",
-      "waste-streams",
       "primary-waste-contractor",
+      "site-and-facilities",
+      "waste-streams",
       "resource-inputs",
       "monitoring-site-controls",
       "compliance-notes",
@@ -1698,11 +1699,11 @@ export default function ProjectInputsPage() {
                   </Button>
                 </div>
               )}
-              {/* Step 1 — Project basics */}
+              {/* Step 1 — Project details */}
               <InputsSectionCard
                 id="project-overview"
                 icon={<LayoutDashboard className="size-5" />}
-                title="Project basics"
+                title="Project details"
                 description="Site, region, project type, dates, and key contacts."
                 whyMatters="Required for compliant SWMP and reporting."
                 accent="emerald"
@@ -2291,7 +2292,7 @@ export default function ProjectInputsPage() {
                 </FieldGroup>
               </InputsSectionCard>
 
-              {/* Site & Facilities (part of Facilities & logistics) */}
+              {/* Site constraints (step 3) */}
               <InputsSectionCard
                 id="site-and-facilities"
                 icon={<Building2 className="size-5" />}
@@ -2299,7 +2300,7 @@ export default function ProjectInputsPage() {
                 description="Constraints that may affect waste handling. Facilities are selected per stream in Waste Streams."
                 accent="amber"
                 variant="grouped"
-                stepStatusBadge={getStepStatusBadge("primary-waste-contractor")}
+                stepStatusBadge={getStepStatusBadge("site-and-facilities")}
               >
                 <FieldGroup
                   label="Site constraints"
@@ -3518,17 +3519,17 @@ export default function ProjectInputsPage() {
             </div>
               </InputsSectionCard>
 
-              {/* Step 4 — Resource inputs (optional) */}
+              {/* Step 5 — Resource inputs */}
               <InputsSectionCard
                 id="resource-inputs"
                 icon={<FileInput className="size-5" />}
-                title="Resource inputs (optional)"
+                title="Resource inputs"
                 description="Sorting level and target diversion. Optional for compliance."
                 whyMatters="Improves reporting and template defaults."
                 accent="zinc"
                 variant="grouped"
                 stepStatusBadge={getStepStatusBadge("resource-inputs")}
-                checklist={["Sorting level set", "Target diversion % (optional)"]}
+                checklist={["Sorting level set", "Target diversion %"]}
               >
                 <FieldGroup gridClassName="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                   <div className="space-y-2">

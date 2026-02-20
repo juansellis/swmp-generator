@@ -1,8 +1,10 @@
-/* Print layout for Report PDF export. Loaded only on /report/export. */
+/* Print layout for Report PDF export and Print View. Used on /report/export and /report/print. */
 
-/* Page geometry: apply on export route so layout is correct for Playwright PDF */
+/* Page geometry: apply on export/print routes so layout is correct for PDF and browser print */
 html.report-export-page,
-html.report-export-page body {
+html.report-print-page,
+html.report-export-page body,
+html.report-print-page body {
   width: 210mm;
   margin: 0;
   padding: 0;
@@ -10,8 +12,11 @@ html.report-export-page body {
 }
 
 html.report-export-page *,
+html.report-print-page *,
 html.report-export-page *::before,
-html.report-export-page *::after {
+html.report-print-page *::before,
+html.report-export-page *::after,
+html.report-print-page *::after {
   box-sizing: border-box;
 }
 
@@ -158,17 +163,31 @@ html.report-export-page *::after {
     page-break-inside: avoid;
   }
 
-  /* No fixed/sticky in print */
+  /* No fixed/sticky in print — prevent sticky headers/sidebars */
   [style*="position: fixed"],
-  [style*="position: sticky"] {
+  [style*="position: sticky"],
+  .print-view-toolbar {
     position: static !important;
   }
+  .print-view-toolbar {
+    display: none !important;
+  }
 
-  /* Cover brand strip: logos constrained, no overlap */
+  /* No shadows or hover effects in print */
+  .report-print-document * {
+    box-shadow: none !important;
+  }
+
+  /* Cover brand strip: reserved space, logos constrained, never overlap text */
+  .cover-brand-strip {
+    min-height: 3rem;
+  }
   .cover-brand-strip img {
     object-fit: contain;
     max-width: 120px;
-    height: 48px;
+    max-height: 48px;
+    height: auto;
+    width: auto;
   }
 
   /* Charts: each in own frame, no overlap */
@@ -234,6 +253,10 @@ html.report-export-page *::after {
     display: table-footer-group;
   }
 
+  .print-table-wrap tbody tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
   .print-table-wrap th,
   .print-table-wrap td {
     overflow-wrap: break-word;

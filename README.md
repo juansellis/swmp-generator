@@ -8,7 +8,6 @@ Next.js + Supabase app to generate NZ-first Site Waste Management Plans (SWMPs).
 3. `npm run dev`
 
 ### PDF export (Report → Download PDF)
-- **Local:** After `npm install`, Chromium is installed and "Download PDF" works.
-- **CI/deploy:** Ensure the install step runs Playwright (e.g. `npm ci` runs postinstall). On Linux you may need system deps: `npx playwright install-deps` (or `playwright install --with-deps`).
-- **Optional:** Set `PLAYWRIGHT_BROWSERS_PATH=0` to use the default browser cache (see `.env.example`).
-- If the PDF engine is missing, the app shows a fallback: "Open print view" → use the browser’s Print → Save as PDF.
+- **Default:** "Download PDF" opens the Print View in a new tab and triggers the browser print dialog. Use **Print → Save as PDF** (or the "Print / Save as PDF" button) to get a PDF. Works on Vercel and local dev without any server-side PDF engine.
+- **Print View route:** `/projects/[id]/report/print` — report-only layout, no app chrome; supports `?mode=full` and `?tab=...` for deep links.
+- **Optional server PDF:** The `/api/report/pdf` endpoint (Playwright/Chromium) is experimental and not used by the default export. If you enable it, ensure Chromium is installed (e.g. `npx playwright install chromium`) and system deps on Linux if needed.

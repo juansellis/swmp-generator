@@ -75,6 +75,28 @@ export type ReportExportData = {
   responsibilities: Array<{ role: string; party: string; responsibilities: string[] }>;
   additional_responsibilities: Array<{ name: string; role: string; email?: string; phone?: string; responsibilities: string }>;
   notes: string | null;
+  /** Carbon forecast: machinery/vehicles and water/energy/fuel (joined to factor libraries). */
+  carbonVehicleEntries: Array<{
+    id: string;
+    factor_id: string;
+    time_active_hours: number;
+    notes: string | null;
+    factor: {
+      name: string;
+      weight_range: string | null;
+      fuel_type: string;
+      avg_consumption_per_hr: number;
+      consumption_unit: string;
+      conversion_factor_kgco2e_per_unit: number;
+    };
+  }>;
+  carbonResourceEntries: Array<{
+    id: string;
+    factor_id: string;
+    quantity_used: number;
+    notes: string | null;
+    factor: { category: string; name: string; unit: string; conversion_factor_kgco2e_per_unit: number };
+  }>;
 };
 
 async function getProjectAndAccess(
@@ -281,6 +303,64 @@ export async function GET(req: Request, { params }: Params) {
       }
     }
 
+    let carbonVehicleEntries: ReportExportData["carbonVehicleEntries"] = [];
+    let carbonResourceEntries: ReportExportData["carbonResourceEntries"] = [];
+    try {
+      const [vEntriesRes, rEntriesRes] = await Promise.all([
+        supabase.from("project_carbon_vehicle_entries").select("*").eq("project_id", projectId),
+        supabase.from("project_carbon_resource_entries").select("*").eq("project_id", projectId),
+      ]);
+      if (vEntriesRes.error || rEntriesRes.error) throw new Error("Carbon tables unavailable");
+      const vEntries = (vEntriesRes.data ?? []) as Array<{ id: string; factor_id: string; time_active_hours: number; notes: string | null }>;
+      const rEntries = (rEntriesRes.data ?? []) as Array<{ id: string; factor_id: string; quantity_used: number; notes: string | null }>;
+      if (vEntries.length > 0) {
+        const vFactorIds = [...new Set(vEntries.map((e) => e.factor_id))];
+        const { data: vFactors } = await supabase
+          .from("carbon_vehicle_factors")
+          .select("id, name, weight_range, fuel_type, avg_consumption_per_hr, consumption_unit, conversion_factor_kgco2e_per_unit")
+          .in("id", vFactorIds);
+        const vFactorMap = new Map((vFactors ?? []).map((f: Record<string, unknown>) => [f.id as string, f]));
+        carbonVehicleEntries = vEntries.map((e) => {
+          const factor = vFactorMap.get(e.factor_id) as ReportExportData["carbonVehicleEntries"][0]["factor"] | undefined;
+          return {
+            id: e.id,
+            factor_id: e.factor_id,
+            time_active_hours: e.time_active_hours,
+            notes: e.notes,
+            factor: factor ?? {
+              name: "—",
+              weight_range: null,
+              fuel_type: "—",
+              avg_consumption_per_hr: 0,
+              consumption_unit: "—",
+              conversion_factor_kgco2e_per_unit: 0,
+            },
+          };
+        });
+      }
+      if (rEntries.length > 0) {
+        const rFactorIds = [...new Set(rEntries.map((e) => e.factor_id))];
+        const { data: rFactors } = await supabase
+          .from("carbon_resource_factors")
+          .select("id, category, name, unit, conversion_factor_kgco2e_per_unit")
+          .in("id", rFactorIds);
+        const rFactorMap = new Map((rFactors ?? []).map((f: Record<string, unknown>) => [f.id as string, f]));
+        carbonResourceEntries = rEntries.map((e) => {
+          const factor = rFactorMap.get(e.factor_id) as ReportExportData["carbonResourceEntries"][0]["factor"] | undefined;
+          return {
+            id: e.id,
+            factor_id: e.factor_id,
+            quantity_used: e.quantity_used,
+            notes: e.notes,
+            factor: factor ?? { category: "—", name: "—", unit: "—", conversion_factor_kgco2e_per_unit: 0 },
+          };
+        });
+      }
+    } catch {
+      carbonVehicleEntries = [];
+      carbonResourceEntries = [];
+    }
+
     const { primary_waste_contractor_partner_id: _pid, user_id: _uid, ...projectClean } = project;
     const preparedAt = new Date().toISOString();
 
@@ -300,6 +380,8 @@ export async function GET(req: Request, { params }: Params) {
       responsibilities,
       additional_responsibilities,
       notes,
+      carbonVehicleEntries,
+      carbonResourceEntries,
     };
 
     return NextResponse.json(data);

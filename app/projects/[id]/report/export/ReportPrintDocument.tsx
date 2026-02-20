@@ -183,6 +183,137 @@ export function ReportPrintDocument({ data, projectName }: Props) {
         <ExportChartsSection chartData={chartData} onReady={handleChartsReady} />
       </section>
 
+      {/* Carbon forecast (site operations) */}
+      {(data.carbonVehicleEntries?.length > 0 || data.carbonResourceEntries?.length > 0) && (
+        <section className={`${PAGE_BREAK} section-spacing page-break-avoid`}>
+          <h2 className="report-h2">Carbon forecast (site operations)</h2>
+          {data.carbonVehicleEntries && data.carbonVehicleEntries.length > 0 && (
+            <div className="mb-6 page-break-avoid">
+              <h3 className="report-h3">Machinery &amp; vehicles</h3>
+              <div className="print-table-wrap overflow-visible rounded-md border border-gray-200">
+                <table className="w-full border-collapse text-sm">
+                  <thead>
+                    <tr className="bg-gray-50">
+                      <th className="text-left p-2 font-medium border-b border-gray-200">Item</th>
+                      <th className="text-left p-2 font-medium border-b border-gray-200 w-24">Fuel type</th>
+                      <th className="text-right p-2 font-medium border-b border-gray-200 w-20">Time (hrs)</th>
+                      <th className="text-right p-2 font-medium border-b border-gray-200 w-20">Consumption/hr</th>
+                      <th className="text-left p-2 font-medium border-b border-gray-200 w-16">Unit</th>
+                      <th className="text-right p-2 font-medium border-b border-gray-200 w-20">kg CO₂e/unit</th>
+                      <th className="text-right p-2 font-medium border-b border-gray-200 w-24">Emissions (kg CO₂e)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.carbonVehicleEntries.map((e) => {
+                      const t = Number(e.time_active_hours) || 0;
+                      const c = e.factor?.avg_consumption_per_hr ?? 0;
+                      const k = e.factor?.conversion_factor_kgco2e_per_unit ?? 0;
+                      const emissions = t * c * k;
+                      const itemLabel = [e.factor?.name, e.factor?.weight_range ? `(${e.factor.weight_range})` : ""].filter(Boolean).join(" ");
+                      return (
+                        <tr key={e.id} className="border-b border-gray-100">
+                          <td className="p-2 break-words">{itemLabel || "—"}</td>
+                          <td className="p-2">{e.factor?.fuel_type ?? "—"}</td>
+                          <td className="p-2 text-right tabular-nums">{t.toFixed(2)}</td>
+                          <td className="p-2 text-right tabular-nums">{c}</td>
+                          <td className="p-2">{e.factor?.consumption_unit ?? "—"}</td>
+                          <td className="p-2 text-right tabular-nums">{k}</td>
+                          <td className="p-2 text-right tabular-nums">{(Math.round(emissions * 100) / 100).toFixed(2)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  <tfoot>
+                    <tr className="bg-gray-50 font-medium border-t border-gray-200">
+                      <td colSpan={6} className="p-2 text-right">Machinery subtotal</td>
+                      <td className="p-2 text-right tabular-nums">
+                        {(Math.round(
+                          data.carbonVehicleEntries.reduce((sum, e) => {
+                            const t = Number(e.time_active_hours) || 0;
+                            const c = e.factor?.avg_consumption_per_hr ?? 0;
+                            const k = e.factor?.conversion_factor_kgco2e_per_unit ?? 0;
+                            return sum + t * c * k;
+                          },
+                          0
+                        ) *
+                          100) /
+                          100).toFixed(2)}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+          )}
+          {data.carbonResourceEntries && data.carbonResourceEntries.length > 0 && (
+            <div className="mb-6 page-break-avoid">
+              <h3 className="report-h3">Water, energy &amp; fuel</h3>
+              <div className="print-table-wrap overflow-visible rounded-md border border-gray-200">
+                <table className="w-full border-collapse text-sm">
+                  <thead>
+                    <tr className="bg-gray-50">
+                      <th className="text-left p-2 font-medium border-b border-gray-200">Item</th>
+                      <th className="text-left p-2 font-medium border-b border-gray-200 w-20">Category</th>
+                      <th className="text-right p-2 font-medium border-b border-gray-200 w-20">Quantity used</th>
+                      <th className="text-left p-2 font-medium border-b border-gray-200 w-16">Unit</th>
+                      <th className="text-right p-2 font-medium border-b border-gray-200 w-20">kg CO₂e/unit</th>
+                      <th className="text-right p-2 font-medium border-b border-gray-200 w-24">Emissions (kg CO₂e)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.carbonResourceEntries.map((e) => {
+                      const q = Number(e.quantity_used) || 0;
+                      const k = e.factor?.conversion_factor_kgco2e_per_unit ?? 0;
+                      const emissions = q * k;
+                      return (
+                        <tr key={e.id} className="border-b border-gray-100">
+                          <td className="p-2 break-words">{e.factor?.name ?? "—"}</td>
+                          <td className="p-2">{e.factor?.category ?? "—"}</td>
+                          <td className="p-2 text-right tabular-nums">{q.toFixed(2)}</td>
+                          <td className="p-2">{e.factor?.unit ?? "—"}</td>
+                          <td className="p-2 text-right tabular-nums">{k}</td>
+                          <td className="p-2 text-right tabular-nums">{(Math.round(emissions * 100) / 100).toFixed(2)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  <tfoot>
+                    <tr className="bg-gray-50 font-medium border-t border-gray-200">
+                      <td colSpan={5} className="p-2 text-right">Water/Energy/Fuel subtotal</td>
+                      <td className="p-2 text-right tabular-nums">
+                        {(Math.round(
+                          data.carbonResourceEntries.reduce((sum, e) => {
+                            const q = Number(e.quantity_used) || 0;
+                            const k = e.factor?.conversion_factor_kgco2e_per_unit ?? 0;
+                            return sum + q * k;
+                          },
+                          0
+                        ) *
+                          100) /
+                          100).toFixed(2)}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+          )}
+          <div className="rounded border border-gray-200 bg-gray-50/50 p-3 page-break-avoid">
+            <p className="text-sm font-semibold tabular-nums">
+              Total operational emissions:{" "}
+              {(
+                Math.round(
+                  ((data.carbonVehicleEntries ?? []).reduce((s, e) => s + (Number(e.time_active_hours) || 0) * (e.factor?.avg_consumption_per_hr ?? 0) * (e.factor?.conversion_factor_kgco2e_per_unit ?? 0), 0) +
+                    (data.carbonResourceEntries ?? []).reduce((s, e) => s + (Number(e.quantity_used) || 0) * (e.factor?.conversion_factor_kgco2e_per_unit ?? 0), 0)) *
+                    100
+                ) / 100
+              ).toFixed(2)}{" "}
+              kg CO₂e
+            </p>
+          </div>
+        </section>
+      )}
+
       {/* Strategy / Recommendations */}
       <section className={`${PAGE_BREAK} section-spacing`}>
         <h2 className="report-h2">Strategy &amp; recommendations</h2>

@@ -4,7 +4,7 @@ import * as React from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 
-export type PhaseTabId = "inputs" | "forecast" | "optimiser" | "report";
+export type PhaseTabId = "inputs" | "forecast" | "carbon" | "optimiser" | "report";
 
 export interface PhaseTabItem {
   id: PhaseTabId;
@@ -39,6 +39,7 @@ export function PhaseTabs({ projectId, forecastCount, className }: PhaseTabsProp
         href: `${base}/forecast`,
         badge: forecastCount != null ? forecastCount : undefined,
       },
+      { id: "carbon", label: "Carbon Forecast", href: `${base}/carbon` },
       { id: "optimiser", label: "Optimiser", href: `${base}/optimiser` },
       { id: "report", label: "Report", href: `${base}/swmp` },
     ],
@@ -48,6 +49,7 @@ export function PhaseTabs({ projectId, forecastCount, className }: PhaseTabsProp
   const isActive = (href: string) => {
     if (href === `${base}/inputs`) return pathname === `${base}/inputs` || pathname === base;
     if (href === `${base}/swmp`) return pathname === `${base}/swmp` || pathname === `${base}/report`;
+    if (href === `${base}/carbon`) return pathname === `${base}/carbon`;
     return pathname === href;
   };
 

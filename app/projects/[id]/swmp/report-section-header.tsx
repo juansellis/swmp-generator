@@ -3,27 +3,25 @@
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { useProjectContext } from "@/app/projects/[id]/project-context";
-import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-export type ReportSection = "overview" | "strategy" | "streams" | "narrative" | "appendix";
+export type ReportSection = "overview" | "strategy" | "streams" | "narrative" | "carbon" | "appendix";
 
 const SECTIONS: { key: ReportSection; label: string }[] = [
   { key: "overview", label: "Overview" },
   { key: "strategy", label: "Strategy" },
   { key: "streams", label: "Waste Streams" },
   { key: "narrative", label: "Narrative" },
+  { key: "carbon", label: "Carbon Forecast" },
   { key: "appendix", label: "Appendix" },
 ];
 
 export function ReportSectionHeader({
   currentSection,
   exportMode,
-  onExportClick,
 }: {
   currentSection: ReportSection;
   exportMode: boolean;
-  onExportClick: () => void;
 }) {
   const params = useParams<{ id: string }>();
   const searchParams = useSearchParams();
@@ -51,14 +49,6 @@ export function ReportSectionHeader({
             )}
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
-            <Button
-              variant={exportMode ? "default" : "outline"}
-              size="sm"
-              className="print:hidden"
-              onClick={onExportClick}
-            >
-              {exportMode ? "Exit export view" : "Export view"}
-            </Button>
             {!exportMode && (
               <nav
                 className="flex items-center gap-0.5 rounded-lg bg-muted p-0.5"
