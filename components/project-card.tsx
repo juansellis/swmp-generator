@@ -1,12 +1,19 @@
 "use client";
 
+import * as React from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { ProjectPhasePills } from "@/components/project-phase-pills";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -16,7 +23,16 @@ import {
 } from "@/components/ui/dropdown-menu";
 import type { ProjectStatusData } from "@/lib/projectStatus";
 import type { PlanningChecklist } from "@/lib/planning/planningChecklist";
-import { MapPin, MoreVertical, FolderOpen, Trash2 } from "lucide-react";
+import { MapPin, MoreVertical, FolderOpen, Trash2, Loader2 } from "lucide-react";
+
+export type ReportStatusValue = "in_progress" | "sent_for_review" | "declined" | "approved";
+
+const REPORT_STATUS_LABELS: Record<ReportStatusValue, string> = {
+  in_progress: "In progress",
+  sent_for_review: "Sent for review",
+  declined: "Declined",
+  approved: "Approved",
+};
 
 export interface ProjectCardProps {
   id: string;
@@ -31,6 +47,10 @@ export interface ProjectCardProps {
   checklist?: PlanningChecklist | null;
   /** When provided, shows "Delete project" in dropdown and calls this with { id, name }. */
   onDeleteRequest?: (project: { id: string; name: string }) => void;
+  /** Current report status; shown as badge + select. Defaults to "in_progress" if missing. */
+  reportStatus?: ReportStatusValue | null;
+  /** Called when user changes report status. Parent should persist and call on failure with error message. */
+  onReportStatusChange?: (projectId: string, value: ReportStatusValue) => Promise<void>;
   className?: string;
 }
 
@@ -45,10 +65,32 @@ export function ProjectCard({
   onOpen,
   checklist,
   onDeleteRequest,
+  reportStatus,
+  onReportStatusChange,
   className,
 }: ProjectCardProps) {
   const readiness = checklist?.readiness_score ?? null;
   const nextAction = checklist?.next_best_action;
+  const effectiveStatus: ReportStatusValue = reportStatus && ["in_progress", "sent_for_review", "declined", "approved"].includes(reportStatus)
+    ? reportStatus
+    : "in_progress";
+  const [statusSaving, setStatusSaving] = React.useState(false);
+  const [localStatus, setLocalStatus] = React.useState<ReportStatusValue>(effectiveStatus);
+
+  React.useEffect(() => {
+    setLocalStatus(effectiveStatus);
+  }, [effectiveStatus]);
+
+  const handleStatusChange = async (value: ReportStatusValue) => {
+    if (!onReportStatusChange || value === localStatus) return;
+    setLocalStatus(value);
+    setStatusSaving(true);
+    try {
+      await onReportStatusChange(id, value);
+    } finally {
+      setStatusSaving(false);
+    }
+  };
 
   return (
     <motion.article
@@ -163,8 +205,34 @@ export function ProjectCard({
           </div>
         )}
 
-        <div className="pt-0.5">
-          <ProjectPhasePills projectId={id} />
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-xs font-medium text-muted-foreground shrink-0">Status</p>
+          <Select
+            value={localStatus}
+            onValueChange={(v) => handleStatusChange(v as ReportStatusValue)}
+            disabled={statusSaving}
+          >
+            <SelectTrigger
+              className="h-8 w-[140px] text-xs shrink-0"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {statusSaving ? (
+                <span className="inline-flex items-center gap-1.5">
+                  <Loader2 className="size-3 animate-spin" />
+                  Saving…
+                </span>
+              ) : (
+                <SelectValue placeholder="Status" />
+              )}
+            </SelectTrigger>
+            <SelectContent onClick={(e) => e.stopPropagation()}>
+              {(["in_progress", "sent_for_review", "declined", "approved"] as const).map((val) => (
+                <SelectItem key={val} value={val}>
+                  {REPORT_STATUS_LABELS[val]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
       </div>
 

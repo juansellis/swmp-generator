@@ -352,7 +352,6 @@ import {
   type BuilderStepId,
 } from "@/lib/swmpBuilder";
 import { BuilderProgressRail } from "@/components/inputs/builder-progress-rail";
-import { ProjectStatusPills } from "@/components/project-status-pills";
 import { SmartHint } from "@/components/smart-hint";
 import { InfoTip } from "@/components/inputs/info-tip";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -1657,7 +1656,6 @@ export default function ProjectInputsPage() {
               { label: "Inputs" },
             ]}
             title="Inputs"
-            subtitle={<ProjectStatusPills status={projectStatus} showLabels={true} className="shrink-0" />}
             saveState={saveState}
             lastSavedAt={lastSavedAt}
           />
@@ -1773,9 +1771,6 @@ export default function ProjectInputsPage() {
                       total: 7,
                     }}
                   >
-                    <div className="mb-4">
-                      <ProjectStatusPills status={projectStatus} showLabels={true} />
-                    </div>
                     {!requiredOk && (
                       <SmartHint
                         message="Complete the required fields below to enable Save Inputs and Generate SWMP."

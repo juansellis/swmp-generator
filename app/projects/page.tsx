@@ -13,7 +13,7 @@ import { Input } from "@/components/ui/input";
 import { PROJECT_TYPE_GROUPS } from "@/lib/projectTypeOptions";
 import { fetchProjectStatusDataForProjects } from "@/lib/projectStatus";
 import type { ProjectStatusData } from "@/lib/projectStatus";
-import { ProjectCard } from "@/components/project-card";
+import { ProjectCard, type ReportStatusValue } from "@/components/project-card";
 import { DeleteProjectDialog } from "@/components/projects/DeleteProjectDialog";
 import { NewProjectSheet } from "@/components/new-project-sheet";
 import type { QuickCreateProjectFormState } from "@/components/quick-create-project-modal";
@@ -29,6 +29,7 @@ import {
 import type { DashboardMetricsResponse } from "@/app/api/dashboard/metrics/route";
 import type { PlanningChecklist } from "@/lib/planning/planningChecklist";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 
 type ProjectRow = {
   id: string;
@@ -43,10 +44,11 @@ type ProjectRow = {
   swmp_owner: string | null;
   primary_waste_contractor_partner_id: string | null;
   created_at: string;
+  report_status?: ReportStatusValue | null;
 };
 
 /** Explicit select so primary_waste_contractor_partner_id and all list fields load (avoids stale/missing columns). */
-const PROJECTS_LIST_SELECT = "id, user_id, name, address, site_address, site_place_id, site_lat, site_lng, region, project_type, start_date, end_date, main_contractor, swmp_owner, primary_waste_contractor_partner_id, created_at";
+const PROJECTS_LIST_SELECT = "id, user_id, name, address, site_address, site_place_id, site_lat, site_lng, region, project_type, start_date, end_date, main_contractor, swmp_owner, primary_waste_contractor_partner_id, created_at, report_status";
 
 type UserView = {
   email: string | null;
@@ -140,6 +142,24 @@ export default function ProjectsPage() {
   const [sheetMessage, setSheetMessage] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [deleteDialogProject, setDeleteDialogProject] = useState<{ id: string; name: string } | null>(null);
+
+  async function handleReportStatusChange(projectId: string, report_status: ReportStatusValue) {
+    const res = await fetch(`/api/projects/${projectId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ report_status }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      toast.error(data?.error ?? "Failed to update report status");
+      await fetchProjects();
+      return;
+    }
+    setProjects((prev) =>
+      prev.map((p) => (p.id === projectId ? { ...p, report_status } : p))
+    );
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -608,6 +628,8 @@ export default function ProjectsPage() {
                         onOpen={() => router.push(`/projects/${p.id}/inputs`)}
                         checklist={checklistByProjectId.get(p.id) ?? null}
                         onDeleteRequest={(proj) => setDeleteDialogProject(proj)}
+                        reportStatus={p.report_status ?? "in_progress"}
+                        onReportStatusChange={handleReportStatusChange}
                       />
                     ))}
                   </div>
