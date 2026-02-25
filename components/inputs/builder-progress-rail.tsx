@@ -12,6 +12,8 @@ const STICKY_TOP_OFFSET = 96;
 export interface BuilderProgressRailProps {
   progress: BuilderStepProgress[];
   onStepClick?: (sectionId: string) => void;
+  /** When set (e.g. from collapsible accordion), highlights this section as active */
+  activeSectionId?: string | null;
   className?: string;
   /** Show as compact dropdown on small screens */
   variant?: "rail" | "bar";
@@ -20,10 +22,14 @@ export interface BuilderProgressRailProps {
 export function BuilderProgressRail({
   progress,
   onStepClick,
+  activeSectionId: controlledActiveId,
   className,
   variant = "rail",
 }: BuilderProgressRailProps) {
-  const [activeSectionId, setActiveSectionId] = React.useState<string | null>(null);
+  const [scrollActiveId, setScrollActiveId] = React.useState<string | null>(null);
+  const activeSectionId = controlledActiveId !== undefined && controlledActiveId !== null
+    ? controlledActiveId
+    : scrollActiveId;
 
   const handleClick = (stepId: BuilderStepId) => {
     const sectionId = STEP_SECTION_IDS[stepId];
@@ -39,12 +45,13 @@ export function BuilderProgressRail({
   };
 
   useEffect(() => {
+    if (controlledActiveId !== undefined && controlledActiveId !== null) return;
     const sectionIds = progress.map((p) => STEP_SECTION_IDS[p.stepId]);
     const observer = new IntersectionObserver(
       (entries) => {
         for (const entry of entries) {
           if (entry.isIntersecting) {
-            setActiveSectionId(entry.target.id);
+            setScrollActiveId(entry.target.id);
             break;
           }
         }
@@ -56,7 +63,7 @@ export function BuilderProgressRail({
       if (el) observer.observe(el);
     });
     return () => observer.disconnect();
-  }, [progress.length]);
+  }, [progress.length, controlledActiveId]);
 
   if (variant === "bar") {
     return (

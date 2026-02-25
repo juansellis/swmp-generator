@@ -524,9 +524,16 @@ export default function ProjectForecastPage() {
     );
   }
 
+  const forecastSectionStatus =
+    items.length === 0
+      ? undefined
+      : unallocatedCount > 0 || needsConversionCount > 0
+        ? ("attention" as const)
+        : ("complete" as const);
+
   return (
     <AppShell>
-      <div className="space-y-10">
+      <div className="space-y-8">
         <ProjectHeader />
         <PageHeader title="Forecast" />
 
@@ -538,7 +545,7 @@ export default function ProjectForecastPage() {
           />
         )}
 
-        <div className="flex gap-8">
+        <div className="flex gap-6">
           <main className="min-w-0 flex-1">
             <InputsSectionCard
               id="forecast-items"
@@ -546,6 +553,37 @@ export default function ProjectForecastPage() {
               title="Forecast Items"
               description="Add and edit forecast line items. Waste qty is calculated from quantity and excess %."
               accent="blue"
+              stepStatusBadge={forecastSectionStatus}
+              actions={
+                items.length > 0 ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() =>
+                      handleItemsChange([
+                        ...items,
+                        {
+                          id: `new-${Date.now()}`,
+                          project_id: projectId!,
+                          item_name: "",
+                          quantity: 0,
+                          unit: "tonne",
+                          excess_percent: 0,
+                          kg_per_m: null,
+                          density_kg_m3: null,
+                          allocated_stream_id: null,
+                          waste_stream_key: null,
+                          computed_waste_qty: 0,
+                          computed_waste_kg: 0,
+                        },
+                      ])
+                    }
+                  >
+                    <PlusIcon className="size-4 mr-2" />
+                    Add item
+                  </Button>
+                ) : undefined
+              }
             >
               {itemsLoading ? (
                 <div className="space-y-4">

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, usePathname, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { useProjectContext, PROJECT_SELECT_FIELDS } from "../project-context";
 
@@ -15,6 +15,7 @@ import { StreamRow } from "@/components/inputs/stream-row";
 import { WasteStreamSelector } from "@/components/inputs/waste-stream-selector";
 import { Notice } from "@/components/notice";
 import { InputsSectionCard, type StepStatusBadge } from "@/components/inputs/section-card";
+import { CollapsibleSectionCard } from "@/components/inputs/collapsible-section-card";
 import { GuidanceBanner } from "@/components/inputs/guidance-banner";
 import { FieldGroup } from "@/components/inputs/field-group";
 import { BuilderHeader } from "@/components/inputs/builder-header";
@@ -352,7 +353,6 @@ import {
 } from "@/lib/swmpBuilder";
 import { BuilderProgressRail } from "@/components/inputs/builder-progress-rail";
 import { ProjectStatusPills } from "@/components/project-status-pills";
-import { StickyActionBar } from "@/components/sticky-action-bar";
 import { SmartHint } from "@/components/smart-hint";
 import { InfoTip } from "@/components/inputs/info-tip";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -363,8 +363,19 @@ const DEFAULT_STATUS: ProjectStatusData = {
   outputs_generated: false,
 };
 
+const SECTION_ORDER = [
+  "project-overview",
+  "primary-waste-contractor",
+  "site-and-facilities",
+  "waste-streams",
+  "resource-inputs",
+  "monitoring-site-controls",
+  "compliance-notes",
+] as const;
+
 export default function ProjectInputsPage() {
   const router = useRouter();
+  const pathname = usePathname();
   const params = useParams<{ id: string }>();
   const projectId = params?.id;
   const projectContext = useProjectContext();
@@ -1117,6 +1128,12 @@ export default function ProjectInputsPage() {
   );
   const builderCompleteCount = countCompleteSteps(builderProgress);
 
+  const [expandedSectionId, setExpandedSectionId] = useState<string>(SECTION_ORDER[0]);
+  useEffect(() => {
+    const next = builderProgress.find((p) => p.status === "recommendedNext");
+    if (next) setExpandedSectionId(STEP_SECTION_IDS[next.stepId]);
+  }, [builderProgress]);
+
   const getStepStatusBadge = useCallback(
     (sectionId: string): StepStatusBadge | undefined => {
       const stepId = (Object.entries(STEP_SECTION_IDS) as [BuilderStepId, string][]).find(
@@ -1545,6 +1562,7 @@ export default function ProjectInputsPage() {
       setLastSavedAt(new Date());
       setSaveMessage("Inputs saved.");
       toast.success("Saved");
+      if (pathname) router.replace(pathname, { scroll: false });
       return true;
     } finally {
       setSaveLoading(false);
@@ -1584,19 +1602,19 @@ export default function ProjectInputsPage() {
   if (loading) {
     return (
       <AppShell>
-        <div className="max-w-6xl mx-auto px-4 space-y-8">
+        <div className="max-w-6xl mx-auto px-4 space-y-6">
           <div className="space-y-3">
             <Skeleton className="h-4 w-64" />
             <Skeleton className="h-8 w-48" />
           </div>
           <Skeleton className="h-14 w-full rounded-xl" />
-          <div className="flex gap-8">
+          <div className="flex gap-6">
             <aside className="hidden lg:block w-52 space-y-2">
               {[1, 2, 3, 4, 5, 6].map((i) => (
                 <Skeleton key={i} className="h-9 w-full rounded-md" />
               ))}
             </aside>
-            <main className="flex-1 space-y-8 min-w-0">
+            <main className="flex-1 space-y-6 min-w-0">
               {[1, 2, 3, 4].map((i) => (
                 <Skeleton key={i} className="h-40 w-full rounded-xl" />
               ))}
@@ -1653,22 +1671,19 @@ export default function ProjectInputsPage() {
           />
         </div>
 
-        <div className="flex gap-8">
+        <div className="flex gap-6">
           <aside className="hidden lg:block w-52 shrink-0">
-            <BuilderProgressRail progress={builderProgress} />
+            <BuilderProgressRail
+              progress={builderProgress}
+              activeSectionId={expandedSectionId}
+              onStepClick={(sectionId) => setExpandedSectionId(sectionId)}
+            />
           </aside>
           <main className="min-w-0 flex-1">
-            <div className="max-w-6xl mx-auto space-y-8">
-              <BuilderHeader
-                progress={builderProgress}
-                completeCount={builderCompleteCount}
-                onApplyTemplate={applyRecommendedContent}
-                applyTemplateDisabled={saveLoading}
-                showApplyTemplate={!!(effectiveProjectType && getTemplatePack(effectiveProjectType))}
-              />
+            <div className="max-w-6xl mx-auto">
               {appliedTemplateLabel && (
                 <div
-                  className="flex flex-wrap items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm dark:border-emerald-800 dark:bg-emerald-950/40"
+                  className="flex flex-wrap items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm dark:border-emerald-800 dark:bg-emerald-950/40 mb-4"
                   role="status"
                   aria-live="polite"
                 >
@@ -1680,10 +1695,7 @@ export default function ProjectInputsPage() {
                     variant="ghost"
                     size="sm"
                     className="h-7 text-emerald-700 hover:text-emerald-900 dark:text-emerald-300 dark:hover:text-emerald-100"
-                    onClick={() => {
-                      const el = document.getElementById("waste-streams");
-                      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
-                    }}
+                    onClick={() => setExpandedSectionId("waste-streams")}
                   >
                     View changes
                   </Button>
@@ -1699,172 +1711,184 @@ export default function ProjectInputsPage() {
                   </Button>
                 </div>
               )}
-              {/* Step 1 — Project details */}
-              <InputsSectionCard
-                id="project-overview"
-                icon={<LayoutDashboard className="size-5" />}
-                title="Project details"
-                description="Site, region, project type, dates, and key contacts."
-                whyMatters="Required for compliant SWMP and reporting."
-                accent="emerald"
-                variant="grouped"
-                stepStatusBadge={getStepStatusBadge("project-overview")}
-                checklist={[
-                  "Project type and region selected",
-                  "Site address validated (choose from suggestions)",
-                  "Start date and client/contractor/SWMP owner filled",
-                ]}
-                guidance={
-                  <GuidanceBanner
-                    complete={getStepStatusBadge("project-overview") === "complete"}
-                    nextStepLabel="Fill required fields (address, region, type, dates, contacts)"
-                    helperText="Validated site address and key contacts are required for SWMP compliance."
-                    ctaLabel="Continue to next step"
-                    onCta={() => scrollToNextSection("project-overview")}
-                  />
-                }
-                footer={
-                  <>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        handleSaveInputs({ preventDefault: () => {} } as React.FormEvent);
-                        scrollToNextSection("project-overview");
-                      }}
-                      disabled={saveLoading || !requiredOk}
-                    >
-                      Save & continue
-                    </Button>
-                    <span className="text-xs text-muted-foreground">You can come back and edit later.</span>
-                  </>
-                }
-                completion={{
-                  completed: [
-                    siteAddress.trim(),
-                    region.trim(),
-                    effectiveProjectType,
-                    startDate.trim(),
-                    clientName.trim(),
-                    mainContractor.trim(),
-                    swmpOwner.trim(),
-                  ].filter(Boolean).length,
-                  total: 7,
-                }}
-              >
-                <div className="mb-4">
-                  <ProjectStatusPills status={projectStatus} showLabels={true} />
-                </div>
-                {!requiredOk && (
-                  <SmartHint
-                    message="Complete the required fields below to enable Save Inputs and Generate SWMP."
-                    variant="warning"
-                    className="mb-4"
-                  />
-                )}
-                {projectSaveErr ? (
-                  <Notice type="error" title="Error" message={projectSaveErr} className="mb-4" />
-                ) : null}
-                {projectSaveMsg ? (
-                  <Notice type="success" title="Success" message={projectSaveMsg} className="mb-4" />
-                ) : null}
-                {!requiredOk ? (
-                  <Notice
-                    type="info"
-                    title="Required fields incomplete"
-                    message="Complete these required fields to enable Save inputs and Generate SWMP."
-                    className="mb-4"
-                  />
-                ) : null}
-
-                <FieldGroup gridClassName="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-                  <div className="space-y-2">
-                    <Label>Site address *</Label>
-                    <AddressPicker
-                      value={siteAddress}
-                      onChange={(v) => {
-                        setSiteAddressValidated(v);
-                        setSiteAddress(v?.formatted_address ?? "");
-                      }}
-                      onInput={(v) => {
-                        setSiteAddress(v);
-                        if (!v.trim()) setSiteAddressValidated(null);
-                      }}
-                      placeholder="Search address…"
-                      disabled={!!saveLoading}
-                    />
-                    <p className="text-xs text-muted-foreground">Choose from suggestions to validate.</p>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Region *</Label>
-                    <Input
-                      value={region}
-                      onChange={(e) => setRegion(e.target.value)}
-                      placeholder="e.g. Auckland / Waikato / Canterbury"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Project type *</Label>
-                    <Select
-                      value={PROJECT_TYPE_OPTIONS.includes(projectType) ? projectType : "Other"}
-                      onValueChange={(v) => {
-                        setProjectType(v ?? "");
-                        if (v !== "Other") setProjectTypeOther("");
-                        if (v && v !== "Other") applyRecommendedContent(v);
-                      }}
-                      disabled={saveLoading}
-                    >
-                      <SelectTrigger className="w-full bg-background">
-                        <SelectValue placeholder="Select project type" />
-                      </SelectTrigger>
-                      <SelectContent className="z-50 bg-popover text-popover-foreground border shadow-md max-h-[min(var(--radix-select-content-available-height),20rem)]">
-                        {PROJECT_TYPE_GROUPS.map((group) => (
-                          <SelectGroup key={group.label}>
-                            <SelectLabel className="font-semibold">{group.label}</SelectLabel>
-                            {group.options.map((opt) => (
-                              <SelectItem key={opt} value={opt}>
-                                {opt}
-                              </SelectItem>
-                            ))}
-                          </SelectGroup>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    {projectType === "Other" && (
-                      <Input
-                        value={projectTypeOther}
-                        onChange={(e) => setProjectTypeOther(e.target.value)}
-                        placeholder="Describe project type"
-                        disabled={saveLoading}
-                        className="mt-2"
+              <form onSubmit={handleSaveInputs} className="space-y-3">
+                <Accordion
+                  type="single"
+                  value={expandedSectionId}
+                  onValueChange={(v) => v && setExpandedSectionId(v)}
+                  collapsible={false}
+                  className="space-y-3"
+                >
+                  {/* Step 1 — Project details */}
+                  <CollapsibleSectionCard
+                    id="project-overview"
+                    icon={<LayoutDashboard className="size-5" />}
+                    title="Project details"
+                    description="Site, region, project type, dates, and key contacts."
+                    whyMatters="Required for compliant SWMP and reporting."
+                    accent="emerald"
+                    variant="grouped"
+                    stepStatusBadge={getStepStatusBadge("project-overview")}
+                    checklist={[
+                      "Project type and region selected",
+                      "Site address validated (choose from suggestions)",
+                      "Start date and client/contractor/SWMP owner filled",
+                    ]}
+                    guidance={
+                      <GuidanceBanner
+                        complete={getStepStatusBadge("project-overview") === "complete"}
+                        nextStepLabel="Fill required fields (address, region, type, dates, contacts)"
+                        helperText="Validated site address and key contacts are required for SWMP compliance."
+                        ctaLabel="Continue to next step"
+                        onCta={() => setExpandedSectionId("primary-waste-contractor")}
+                      />
+                    }
+                    footer={
+                      <>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            handleSaveInputs({ preventDefault: () => {} } as React.FormEvent);
+                            setExpandedSectionId("primary-waste-contractor");
+                          }}
+                          disabled={saveLoading || !requiredOk}
+                        >
+                          Save & continue
+                        </Button>
+                        <span className="text-xs text-muted-foreground">You can come back and edit later.</span>
+                      </>
+                    }
+                    completion={{
+                      completed: [
+                        siteAddress.trim(),
+                        region.trim(),
+                        effectiveProjectType,
+                        startDate.trim(),
+                        clientName.trim(),
+                        mainContractor.trim(),
+                        swmpOwner.trim(),
+                      ].filter(Boolean).length,
+                      total: 7,
+                    }}
+                  >
+                    <div className="mb-4">
+                      <ProjectStatusPills status={projectStatus} showLabels={true} />
+                    </div>
+                    {!requiredOk && (
+                      <SmartHint
+                        message="Complete the required fields below to enable Save Inputs and Generate SWMP."
+                        variant="warning"
+                        className="mb-4"
                       />
                     )}
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Start date *</Label>
-                    <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Client name *</Label>
-                    <Input value={clientName} onChange={(e) => setClientName(e.target.value)} />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Main contractor *</Label>
-                    <Input
-                      value={mainContractor}
-                      onChange={(e) => setMainContractor(e.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-2 md:col-span-2 xl:col-span-1">
-                    <Label>SWMP owner *</Label>
-                    <Input
-                      value={swmpOwner}
-                      onChange={(e) => setSwmpOwner(e.target.value)}
-                      placeholder="Person responsible for the SWMP"
-                    />
-                  </div>
-                </FieldGroup>
+                    {projectSaveErr ? (
+                      <Notice type="error" title="Error" message={projectSaveErr} className="mb-4" />
+                    ) : null}
+                    {projectSaveMsg ? (
+                      <Notice type="success" title="Success" message={projectSaveMsg} className="mb-4" />
+                    ) : null}
+                    {!requiredOk ? (
+                      <Notice
+                        type="info"
+                        title="Required fields incomplete"
+                        message="Complete these required fields to enable Save inputs and Generate SWMP."
+                        className="mb-4"
+                      />
+                    ) : null}
+
+                    <FieldGroup gridClassName="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                      <div className="space-y-2 md:col-span-2 xl:col-span-1">
+                        <Label>Site address *</Label>
+                        <AddressPicker
+                          value={siteAddress}
+                          onChange={(v) => {
+                            setSiteAddressValidated(v);
+                            setSiteAddress(v?.formatted_address ?? "");
+                          }}
+                          onInput={(v) => {
+                            setSiteAddress(v);
+                            if (!v.trim()) setSiteAddressValidated(null);
+                          }}
+                          placeholder="Search address…"
+                          disabled={!!saveLoading}
+                        />
+                        <p className="text-xs text-muted-foreground">Choose from suggestions to validate.</p>
+                      </div>
+                      <div className="space-y-2 flex flex-wrap gap-4 md:gap-6 items-end">
+                        <div className="space-y-2 min-w-[140px] flex-1">
+                          <Label>Region *</Label>
+                          <Input
+                            value={region}
+                            onChange={(e) => setRegion(e.target.value)}
+                            placeholder="e.g. Auckland / Waikato"
+                          />
+                        </div>
+                        <div className="space-y-2 min-w-[160px] flex-1">
+                          <Label>Project type *</Label>
+                          <Select
+                            value={PROJECT_TYPE_OPTIONS.includes(projectType) ? projectType : "Other"}
+                            onValueChange={(v) => {
+                              setProjectType(v ?? "");
+                              if (v !== "Other") setProjectTypeOther("");
+                              if (v && v !== "Other") applyRecommendedContent(v);
+                            }}
+                            disabled={saveLoading}
+                          >
+                            <SelectTrigger className="w-full bg-background">
+                              <SelectValue placeholder="Select type" />
+                            </SelectTrigger>
+                            <SelectContent className="z-50 bg-popover text-popover-foreground border shadow-md max-h-[min(var(--radix-select-content-available-height),20rem)]">
+                              {PROJECT_TYPE_GROUPS.map((group) => (
+                                <SelectGroup key={group.label}>
+                                  <SelectLabel className="font-semibold">{group.label}</SelectLabel>
+                                  {group.options.map((opt) => (
+                                    <SelectItem key={opt} value={opt}>
+                                      {opt}
+                                    </SelectItem>
+                                  ))}
+                                </SelectGroup>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          {projectType === "Other" && (
+                            <Input
+                              value={projectTypeOther}
+                              onChange={(e) => setProjectTypeOther(e.target.value)}
+                              placeholder="Describe project type"
+                              disabled={saveLoading}
+                              className="mt-2"
+                            />
+                          )}
+                        </div>
+                        <div className="space-y-2 min-w-[120px]">
+                          <Label>Start date *</Label>
+                          <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+                        </div>
+                      </div>
+                      <div className="space-y-2 flex flex-wrap gap-4 md:gap-6 items-end md:col-span-3">
+                        <div className="space-y-2 min-w-[160px] flex-1">
+                          <Label>Client name *</Label>
+                          <Input value={clientName} onChange={(e) => setClientName(e.target.value)} />
+                        </div>
+                        <div className="space-y-2 min-w-[160px] flex-1">
+                          <Label>Main contractor *</Label>
+                          <Input
+                            value={mainContractor}
+                            onChange={(e) => setMainContractor(e.target.value)}
+                          />
+                        </div>
+                        <div className="space-y-2 min-w-[160px] flex-1">
+                          <Label>SWMP owner *</Label>
+                          <Input
+                            value={swmpOwner}
+                            onChange={(e) => setSwmpOwner(e.target.value)}
+                            placeholder="Person responsible for the SWMP"
+                          />
+                        </div>
+                      </div>
+                    </FieldGroup>
 
                 <Accordion type="single" collapsible defaultValue="" className="w-full max-w-full overflow-hidden mt-6">
           <AccordionItem value="report" className="border border-border/50 rounded-lg px-0 mb-2 overflow-hidden">
@@ -2221,39 +2245,32 @@ export default function ProjectInputsPage() {
                     Save project details
                   </Button>
                 </div>
-              </InputsSectionCard>
+              </CollapsibleSectionCard>
 
-              <form onSubmit={handleSaveInputs} className="space-y-10">
-              {/* Step 3 — Facilities & logistics */}
-              <InputsSectionCard
-                id="primary-waste-contractor"
-                icon={<Users className="size-5" />}
-                title="Facilities & logistics"
-                description="Primary waste contractor. Set destinations per stream in Waste Streams."
-                whyMatters="Enables facility recommendations and diversion tracking."
-                accent="blue"
-                variant="grouped"
-                stepStatusBadge={getStepStatusBadge("primary-waste-contractor")}
-                checklist={[
-                  "Primary waste contractor (partner) selected",
-                  "Each waste stream has a facility or custom destination (in Waste Streams)",
-                ]}
-                guidance={
-                  <GuidanceBanner
-                    complete={getStepStatusBadge("primary-waste-contractor") === "complete"}
-                    nextStepLabel="Choose a facility per stream or run the optimiser"
-                    helperText="Destinations are set per stream in Waste Streams; they enable diversion tracking."
-                    ctaLabel="Go to Waste Streams"
-                    onCta={() => {
-                      const el = document.getElementById("waste-streams");
-                      if (el) {
-                        const y = el.getBoundingClientRect().top + window.scrollY - 96;
-                        window.scrollTo({ top: Math.max(0, y), behavior: "smooth" });
-                      }
-                    }}
-                  />
-                }
-              >
+                  {/* Facilities & logistics */}
+                  <CollapsibleSectionCard
+                    id="primary-waste-contractor"
+                    icon={<Users className="size-5" />}
+                    title="Facilities & logistics"
+                    description="Primary waste contractor. Set destinations per stream in Waste Streams."
+                    whyMatters="Enables facility recommendations and diversion tracking."
+                    accent="blue"
+                    variant="grouped"
+                    stepStatusBadge={getStepStatusBadge("primary-waste-contractor")}
+                    checklist={[
+                      "Primary waste contractor (partner) selected",
+                      "Each waste stream has a facility or custom destination (in Waste Streams)",
+                    ]}
+                    guidance={
+                      <GuidanceBanner
+                        complete={getStepStatusBadge("primary-waste-contractor") === "complete"}
+                        nextStepLabel="Choose a facility per stream or run the optimiser"
+                        helperText="Destinations are set per stream in Waste Streams; they enable diversion tracking."
+                        ctaLabel="Go to Waste Streams"
+                        onCta={() => setExpandedSectionId("waste-streams")}
+                      />
+                    }
+                  >
                 {selectedWasteStreams.length > 0 && (
                   <p className="text-sm text-muted-foreground mb-4">
                     Per-stream contractor overrides are set in Waste Streams below.
@@ -2290,18 +2307,18 @@ export default function ProjectInputsPage() {
                     )}
                   </div>
                 </FieldGroup>
-              </InputsSectionCard>
+              </CollapsibleSectionCard>
 
-              {/* Site constraints (step 3) */}
-              <InputsSectionCard
-                id="site-and-facilities"
-                icon={<Building2 className="size-5" />}
-                title="Site constraints"
-                description="Constraints that may affect waste handling. Facilities are selected per stream in Waste Streams."
-                accent="amber"
-                variant="grouped"
-                stepStatusBadge={getStepStatusBadge("site-and-facilities")}
-              >
+                  {/* Site constraints */}
+                  <CollapsibleSectionCard
+                    id="site-and-facilities"
+                    icon={<Building2 className="size-5" />}
+                    title="Site constraints"
+                    description="Constraints that may affect waste handling. Facilities are selected per stream in Waste Streams."
+                    accent="amber"
+                    variant="grouped"
+                    stepStatusBadge={getStepStatusBadge("site-and-facilities")}
+                  >
                 <FieldGroup
                   label="Site constraints"
                   gridClassName="grid grid-cols-1 sm:grid-cols-2 gap-6"
@@ -2319,72 +2336,74 @@ export default function ProjectInputsPage() {
                     </div>
                   ))}
                 </FieldGroup>
-              </InputsSectionCard>
+              </CollapsibleSectionCard>
 
-              {/* Step 2 — Waste streams */}
-              <InputsSectionCard
-                id="waste-streams"
-                icon={<Recycle className="size-5" />}
-                title={
-                  <span className="inline-flex items-center gap-1.5">
-                    Waste streams
-                    <InfoTip
-                      label="Waste streams help"
-                      content="A waste stream is a type of material (e.g. Mixed C&D, timber, plasterboard). Tonnes you enter drive diversion % and the SWMP report."
-                      variant="tooltip"
-                    />
-                  </span>
-                }
-                description="Select streams, set quantities, disposal method, and destination per stream."
-                whyMatters="Core data for diversion calculations and the generated SWMP."
-                accent="green"
-                variant="grouped"
-                stepStatusBadge={getStepStatusBadge("waste-streams")}
-                checklist={[
-                  "At least one waste stream selected",
-                  "Planned tonnes entered for at least one stream",
-                  "Disposal method and destination set per stream",
-                ]}
-                guidance={
-                  <GuidanceBanner
-                    complete={getStepStatusBadge("waste-streams") === "complete"}
-                    nextStepLabel={wasteStreamsGuidance.nextStepLabel || undefined}
-                    helperText="Streams and quantities drive diversion calculations and the generated SWMP."
-                    ctaLabel={wasteStreamsGuidance.ctaLabel || "Go to waste streams"}
-                    onCta={() => {
-                      const el = document.getElementById(selectedWasteStreams.length > 0 ? "waste-stream-planning" : "waste-streams");
-                      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+                  {/* Waste streams — primary focus */}
+                  <CollapsibleSectionCard
+                    id="waste-streams"
+                    icon={<Recycle className="size-5" />}
+                    title={
+                      <span className="inline-flex items-center gap-1.5">
+                        Waste streams
+                        <InfoTip
+                          label="Waste streams help"
+                          content="A waste stream is a type of material (e.g. Mixed C&D, timber, plasterboard). Tonnes you enter drive diversion % and the SWMP report."
+                          variant="tooltip"
+                        />
+                      </span>
+                    }
+                    description="Select streams, set quantities, disposal method, and destination per stream."
+                    whyMatters="Core data for diversion calculations and the generated SWMP."
+                    accent="green"
+                    variant="primary"
+                    stepStatusBadge={getStepStatusBadge("waste-streams")}
+                    checklist={[
+                      "At least one waste stream selected",
+                      "Planned tonnes entered for at least one stream",
+                      "Disposal method and destination set per stream",
+                    ]}
+                    guidance={
+                      <GuidanceBanner
+                        complete={getStepStatusBadge("waste-streams") === "complete"}
+                        nextStepLabel={wasteStreamsGuidance.nextStepLabel || undefined}
+                        helperText="Streams and quantities drive diversion calculations and the generated SWMP."
+                        ctaLabel={wasteStreamsGuidance.ctaLabel || "Go to waste streams"}
+                        onCta={() => {
+                          if (selectedWasteStreams.length > 0) {
+                            const el = document.getElementById("waste-stream-planning");
+                            if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+                          }
+                        }}
+                      />
+                    }
+                    footer={
+                      <>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            handleSaveInputs({ preventDefault: () => {} } as React.FormEvent);
+                            setExpandedSectionId("resource-inputs");
+                          }}
+                          disabled={saveLoading}
+                        >
+                          Save & continue
+                        </Button>
+                        <span className="text-xs text-muted-foreground">You can come back and edit later.</span>
+                      </>
+                    }
+                    completion={{
+                      completed: (() => {
+                        if (selectedWasteStreams.length === 0) return 0;
+                        return selectedWasteStreams.filter((stream) => {
+                          const plan = streamPlans.find((p) => p.category === stream);
+                          return computeWasteStreamCompletion(plan, { requireTonnes: true });
+                        }).length;
+                      })(),
+                      total: Math.max(selectedWasteStreams.length, 1),
                     }}
-                  />
-                }
-                footer={
-                  <>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        handleSaveInputs({ preventDefault: () => {} } as React.FormEvent);
-                        scrollToNextSection("waste-streams");
-                      }}
-                      disabled={saveLoading}
-                    >
-                      Save & continue
-                    </Button>
-                    <span className="text-xs text-muted-foreground">You can come back and edit later.</span>
-                  </>
-                }
-                completion={{
-                  completed: (() => {
-                    if (selectedWasteStreams.length === 0) return 0;
-                    return selectedWasteStreams.filter((stream) => {
-                      const plan = streamPlans.find((p) => p.category === stream);
-                      return computeWasteStreamCompletion(plan, { requireTonnes: true });
-                    }).length;
-                  })(),
-                  total: Math.max(selectedWasteStreams.length, 1),
-                }}
-              >
+                  >
             <div className="space-y-6">
             {selectedWasteStreams.length === 0 && (
               <SmartHint
@@ -3517,20 +3536,20 @@ export default function ProjectInputsPage() {
               </div>
             </div>
             </div>
-              </InputsSectionCard>
+              </CollapsibleSectionCard>
 
-              {/* Step 5 — Resource inputs */}
-              <InputsSectionCard
-                id="resource-inputs"
-                icon={<FileInput className="size-5" />}
-                title="Resource inputs"
-                description="Sorting level and target diversion. Optional for compliance."
-                whyMatters="Improves reporting and template defaults."
-                accent="zinc"
-                variant="grouped"
-                stepStatusBadge={getStepStatusBadge("resource-inputs")}
-                checklist={["Sorting level set", "Target diversion %"]}
-              >
+                  {/* Resource inputs */}
+                  <CollapsibleSectionCard
+                    id="resource-inputs"
+                    icon={<FileInput className="size-5" />}
+                    title="Resource inputs"
+                    description="Sorting level and target diversion. Optional for compliance."
+                    whyMatters="Improves reporting and template defaults."
+                    accent="zinc"
+                    variant="grouped"
+                    stepStatusBadge={getStepStatusBadge("resource-inputs")}
+                    checklist={["Sorting level set", "Target diversion %"]}
+                  >
                 <FieldGroup gridClassName="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                   <div className="space-y-2">
                     <Label>Sorting level</Label>
@@ -3592,50 +3611,50 @@ export default function ProjectInputsPage() {
                     </div>
                   </div>
                 </FieldGroup>
-              </InputsSectionCard>
+              </CollapsibleSectionCard>
 
-              {/* Step 5 — Monitoring & site controls */}
-              <InputsSectionCard
-                id="monitoring-site-controls"
-                icon={<ClipboardList className="size-5" />}
-                title="Monitoring & site controls"
-                description="Cadence, evidence types, and site controls for the SWMP."
-                whyMatters="Required for compliant monitoring and reporting."
-                accent="blue"
-                variant="grouped"
-                stepStatusBadge={getStepStatusBadge("monitoring-site-controls")}
-                checklist={[
-                  "Reporting cadence selected",
-                  "At least one evidence type or software toggled",
-                  "Site controls described (signage, contamination, hazardous)",
-                ]}
-                guidance={
-                  <GuidanceBanner
-                    complete={getStepStatusBadge("monitoring-site-controls") === "complete"}
-                    nextStepLabel="Select how you will evidence waste tracking"
-                    helperText="Cadence and evidence types are required for compliant monitoring and reporting."
-                    ctaLabel="Set monitoring"
-                    onCta={() => scrollToNextSection("monitoring-site-controls")}
-                  />
-                }
-                footer={
-                  <>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        handleSaveInputs({ preventDefault: () => {} } as React.FormEvent);
-                        scrollToNextSection("monitoring-site-controls");
-                      }}
-                      disabled={saveLoading}
-                    >
-                      Save & continue
-                    </Button>
-                    <span className="text-xs text-muted-foreground">You can come back and edit later.</span>
-                  </>
-                }
-              >
+                  {/* Monitoring & site controls */}
+                  <CollapsibleSectionCard
+                    id="monitoring-site-controls"
+                    icon={<ClipboardList className="size-5" />}
+                    title="Monitoring & site controls"
+                    description="Cadence, evidence types, and site controls for the SWMP."
+                    whyMatters="Required for compliant monitoring and reporting."
+                    accent="blue"
+                    variant="grouped"
+                    stepStatusBadge={getStepStatusBadge("monitoring-site-controls")}
+                    checklist={[
+                      "Reporting cadence selected",
+                      "At least one evidence type or software toggled",
+                      "Site controls described (signage, contamination, hazardous)",
+                    ]}
+                    guidance={
+                      <GuidanceBanner
+                        complete={getStepStatusBadge("monitoring-site-controls") === "complete"}
+                        nextStepLabel="Select how you will evidence waste tracking"
+                        helperText="Cadence and evidence types are required for compliant monitoring and reporting."
+                        ctaLabel="Set monitoring"
+                        onCta={() => setExpandedSectionId("monitoring-site-controls")}
+                      />
+                    }
+                    footer={
+                      <>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            handleSaveInputs({ preventDefault: () => {} } as React.FormEvent);
+                            setExpandedSectionId("compliance-notes");
+                          }}
+                          disabled={saveLoading}
+                        >
+                          Save & continue
+                        </Button>
+                        <span className="text-xs text-muted-foreground">You can come back and edit later.</span>
+                      </>
+                    }
+                  >
                 <Accordion type="single" collapsible defaultValue="" className="w-full max-w-full overflow-hidden">
               <AccordionItem value="monitoring" className="border border-border/50 rounded-lg px-0 mb-2 overflow-hidden">
                 <AccordionTrigger className="w-full px-4 py-4 bg-muted/40 hover:bg-muted/60 transition-colors [&[data-state=open]]:bg-muted/60 rounded-t-lg data-[state=open]:rounded-b-none [&>svg]:shrink-0">
@@ -3808,24 +3827,24 @@ export default function ProjectInputsPage() {
                 </AccordionContent>
               </AccordionItem>
                 </Accordion>
-              </InputsSectionCard>
+              </CollapsibleSectionCard>
 
-              {/* Step 6 — Review & generate */}
-              <InputsSectionCard
-                id="compliance-notes"
-                icon={<FileText className="size-5" />}
-                title="Review & generate"
-                description="Responsibilities, notes, save inputs, and generate the SWMP document."
-                whyMatters="Final step to produce a compliant Site Waste Management Plan."
-                accent="amber"
-                variant="grouped"
-                stepStatusBadge={getStepStatusBadge("compliance-notes")}
-                checklist={[
-                  "Responsibilities and notes (optional)",
-                  "Save Inputs",
-                  "Generate SWMP when ready",
-                ]}
-              >
+                  {/* Review & generate */}
+                  <CollapsibleSectionCard
+                    id="compliance-notes"
+                    icon={<FileText className="size-5" />}
+                    title="Review & generate"
+                    description="Responsibilities, notes, save inputs, and generate the SWMP document."
+                    whyMatters="Final step to produce a compliant Site Waste Management Plan."
+                    accent="amber"
+                    variant="grouped"
+                    stepStatusBadge={getStepStatusBadge("compliance-notes")}
+                    checklist={[
+                      "Responsibilities and notes (optional)",
+                      "Save Inputs",
+                      "Generate SWMP when ready",
+                    ]}
+                  >
                 <Accordion type="single" collapsible defaultValue="" className="w-full max-w-full overflow-hidden">
               <AccordionItem value="responsibilities" className="border border-border/50 rounded-lg px-0 mb-2 overflow-hidden">
                 <AccordionTrigger className="w-full px-4 py-4 bg-muted/40 hover:bg-muted/60 transition-colors [&[data-state=open]]:bg-muted/60 rounded-t-lg data-[state=open]:rounded-b-none [&>svg]:shrink-0">
@@ -4075,27 +4094,25 @@ export default function ProjectInputsPage() {
                     {isGenerating ? "Generating…" : "Generate SWMP"}
                   </Button>
                 </div>
-              </InputsSectionCard>
+              </CollapsibleSectionCard>
+                </Accordion>
+              </form>
 
-              <StickyActionBar
-                saveState={saveState}
-                onSave={() => handleSaveInputs({ preventDefault: () => {} } as React.FormEvent)}
-                saveLabel="Save Inputs"
-                lastSavedAt={lastSavedAt}
-                disabled={!requiredOk || saveLoading}
-                secondaryAction={
+              {/* Sticky bottom-right: Continue to planning */}
+              {projectId && (
+                <div className="fixed bottom-6 right-6 z-20 print:hidden">
                   <Button
                     type="button"
-                    variant="primary"
-                    size="default"
-                    onClick={handleGenerate}
+                    size="lg"
+                    className="rounded-full shadow-lg gap-2"
+                    onClick={() => router.push(`/projects/${projectId}/swmp`)}
                     disabled={!requiredOk || saveLoading || isGenerating}
                   >
-                    {isGenerating ? "Generating…" : "Generate SWMP"}
+                    <ClipboardCheck className="size-5" />
+                    Continue to planning
                   </Button>
-                }
-              />
-              </form>
+                </div>
+              )}
             </div>
           </main>
         </div>

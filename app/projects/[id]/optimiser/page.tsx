@@ -5,7 +5,8 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { AppShell } from "@/components/app-shell";
 import { ProjectHeader } from "@/components/project-header";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { PlanSectionHeader } from "@/components/plan-section-header";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -32,22 +33,20 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useProjectContext } from "../project-context";
 import { toast } from "sonner";
-import { Zap, ChevronDown, Info, MapPin, CheckCircle2, AlertCircle } from "lucide-react";
+import { Zap, ChevronDown, ChevronRight, Info, MapPin, CheckCircle2, AlertCircle } from "lucide-react";
+import { Label } from "@/components/ui/label";
+import { cn } from "@/lib/utils";
 
 type OptimiserResultItem = {
   stream_name: string;
   planned_tonnes: number;
   recommended_facility_id: string;
   recommended_facility_name: string;
+  /** 0–1 composite score (higher = better) */
+  score?: number;
   distance_km: number | null;
   duration_min: number | null;
   estimated_cost: number | null;
@@ -98,12 +97,17 @@ export default function ProjectOptimiserPage() {
   const [applyLoading, setApplyLoading] = React.useState(false);
   const [applyDialogOpen, setApplyDialogOpen] = React.useState(false);
   const [weightDistance, setWeightDistance] = React.useState(1);
+  const [weightCost, setWeightCost] = React.useState(0);
+  const [weightCarbon, setWeightCarbon] = React.useState(0);
+  const [weightDiversion, setWeightDiversion] = React.useState(0);
+  const [expandedExplainStream, setExpandedExplainStream] = React.useState<string | null>(null);
   const [lastRunAt, setLastRunAt] = React.useState<number | null>(null);
   const [overrides, setOverrides] = React.useState<Map<string, string>>(new Map());
   const [geoAction, setGeoAction] = React.useState<"idle" | "geocode_project" | "geocode_facilities" | "recompute">("idle");
   const [geoProgress, setGeoProgress] = React.useState<string | null>(null);
   const [runConfirmOpen, setRunConfirmOpen] = React.useState(false);
   const [runConfirmPending, setRunConfirmPending] = React.useState<"geocode_and_run" | "run_fallback" | null>(null);
+  const [debugDistances, setDebugDistances] = React.useState<{ loaded: number; total: number } | null>(null);
 
   const fetchStatus = React.useCallback(async () => {
     if (!projectId) return;
@@ -198,6 +202,40 @@ export default function ProjectOptimiserPage() {
       const updated = (data as { updated?: number }).updated ?? 0;
       toast.success(updated > 0 ? `Computed distances for ${updated} facilities` : "Distances up to date");
       await fetchStatus();
+      // Refresh optimiser results so distance column uses new distances (no page refresh)
+      if (results != null && results.length > 0) {
+        const optRes = await fetch(`/api/projects/${projectId}/facility-optimiser`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({
+            weights: {
+              distance: weightDistance,
+              cost: weightCost,
+              carbon: weightCarbon,
+              diversion: weightDiversion,
+            },
+          }),
+        });
+        if (optRes.ok) {
+          const optData = await optRes.json();
+          setResults(optData.results ?? []);
+          setStatus((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  distances_cached: optData.distances_cached ?? prev.distances_cached,
+                  last_updated_at: optData.last_updated_at ?? prev.last_updated_at,
+                }
+              : prev
+          );
+          setDebugDistances(
+            optData.debug_distances_loaded != null && optData.debug_distances_total != null
+              ? { loaded: optData.debug_distances_loaded, total: optData.debug_distances_total }
+              : null
+          );
+        }
+      }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Recompute failed");
     } finally {
@@ -242,37 +280,25 @@ export default function ProjectOptimiserPage() {
   const handleRunOptimiser = async (opts?: { skipRecompute?: boolean }) => {
     if (!projectId) return;
     setRunLoading(true);
+    const hadNoDistances =
+      !opts?.skipRecompute &&
+      (status?.distances_cached ?? 0) === 0 &&
+      (status?.facilities_total ?? 0) > 0;
+    if (hadNoDistances) setRunPhase("computing");
+    else setRunPhase("running");
     try {
-      const needsCompute =
-        !opts?.skipRecompute &&
-        (status?.distances_cached ?? 0) === 0 &&
-        (status?.facilities_total ?? 0) > 0;
-      if (needsCompute) {
-        setRunPhase("computing");
-        const recomputeRes = await fetch(`/api/projects/${projectId}/distances/recompute`, {
-          method: "POST",
-          credentials: "include",
-        });
-        if (!recomputeRes.ok) {
-          const err = await recomputeRes.json().catch(() => ({}));
-          throw new Error((err as { error?: string }).error ?? "Could not compute distances");
-        }
-        const recomputeData = await recomputeRes.json().catch(() => ({}));
-        const updated = (recomputeData as { updated?: number }).updated ?? 0;
-        if (updated > 0) {
-          toast.success(`Computed distances for ${updated} facilities`);
-        }
-        await fetchStatus();
-        setRunPhase("running");
-      } else {
-        setRunPhase("running");
-      }
+      // Single source of truth: POST ensures distances (fetch or compute + persist) then runs scoring
       const res = await fetch(`/api/projects/${projectId}/facility-optimiser`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify({
-          weights: { distance: weightDistance, cost: 0, carbon: 0 },
+          weights: {
+            distance: weightDistance,
+            cost: weightCost,
+            carbon: weightCarbon,
+            diversion: weightDiversion,
+          },
         }),
       });
       if (!res.ok) {
@@ -295,7 +321,16 @@ export default function ProjectOptimiserPage() {
             }
           : prev
       );
-      toast.success("Optimiser run complete");
+      setDebugDistances(
+        data.debug_distances_loaded != null && data.debug_distances_total != null
+          ? { loaded: data.debug_distances_loaded, total: data.debug_distances_total }
+          : null
+      );
+      if (hadNoDistances && (data.distances_cached ?? 0) > 0) {
+        toast.success(`Distances loaded. Optimiser run complete.`);
+      } else {
+        toast.success("Optimiser run complete");
+      }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Run failed");
     } finally {
@@ -311,18 +346,8 @@ export default function ProjectOptimiserPage() {
     return row.recommended_facility_id || "";
   };
 
-  const handleApply = async () => {
-    if (!projectId || displayResults.length === 0) return;
-    const assignments = displayResults
-      .map((r) => {
-        const fid = effectiveSelection(r);
-        return fid ? { stream_name: r.stream_name, facility_id: fid } : null;
-      })
-      .filter((a): a is { stream_name: string; facility_id: string } => a != null);
-    if (assignments.length === 0) {
-      toast.error("No facility selections to apply");
-      return;
-    }
+  const applyAssignments = async (assignments: { stream_name: string; facility_id: string }[]) => {
+    if (!projectId || assignments.length === 0) return;
     setApplyLoading(true);
     try {
       const res = await fetch(`/api/projects/${projectId}/facility-optimiser/apply`, {
@@ -341,6 +366,7 @@ export default function ProjectOptimiserPage() {
       setResults(null);
       setLastRunAt(null);
       setOverrides(new Map());
+      setDebugDistances(null);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Apply failed");
     } finally {
@@ -348,48 +374,65 @@ export default function ProjectOptimiserPage() {
     }
   };
 
+  const handleApply = async () => {
+    if (!projectId || displayResults.length === 0) return;
+    const assignments = displayResults
+      .map((r) => {
+        const fid = effectiveSelection(r);
+        return fid ? { stream_name: r.stream_name, facility_id: fid } : null;
+      })
+      .filter((a): a is { stream_name: string; facility_id: string } => a != null);
+    if (assignments.length === 0) {
+      toast.error("No facility selections to apply");
+      return;
+    }
+    await applyAssignments(assignments);
+  };
+
+  const handleAutoApply = async () => {
+    if (!projectId || displayResults.length === 0) return;
+    const assignments = displayResults
+      .filter((r) => r.recommended_facility_id)
+      .map((r) => ({ stream_name: r.stream_name, facility_id: r.recommended_facility_id! }));
+    if (assignments.length === 0) {
+      toast.error("No recommendations to apply");
+      return;
+    }
+    await applyAssignments(assignments);
+  };
+
   const noStreams = streams.length === 0 && !loading;
   const noFacilities = (status?.facilities_total ?? 0) === 0 && !loading;
   const distancesNotYetComputed = (status?.distances_cached ?? 0) === 0 && (status?.facilities_total ?? 0) > 0 && !loading;
   const hasResults = displayResults.length > 0;
 
+  const optimiserStatus = hasResults
+    ? "complete"
+    : noStreams || noFacilities
+      ? undefined
+      : "needs_attention";
+
   return (
     <AppShell>
-      <div className="max-w-6xl mx-auto px-4 py-6 space-y-6">
+      <div className="max-w-6xl mx-auto px-4 py-5 space-y-5 min-w-0 overflow-x-hidden">
         <ProjectHeader />
-        <Card className="border-border/50 shadow-sm">
-          <CardHeader>
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <CardTitle className="text-lg flex items-center gap-2">
-                  <Zap className="size-5 text-amber-500" />
-                  Facility Optimiser
-                </CardTitle>
-                <p className="text-sm text-muted-foreground mt-1">
-                  Recommend best facilities per stream based on distance, cost, and carbon.
-                </p>
-              </div>
-              <div className="flex flex-wrap items-center gap-3 mt-2 sm:mt-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-muted-foreground whitespace-nowrap">Distance weight</span>
-                  <Select
-                    value={String(weightDistance)}
-                    onValueChange={(v) => setWeightDistance(Number(v))}
-                  >
-                    <SelectTrigger className="w-[100px] h-8 border-border/50">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="1">1 (default)</SelectItem>
-                      <SelectItem value="2">2</SelectItem>
-                      <SelectItem value="0.5">0.5</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+        <Card className="border-border/50 shadow-sm overflow-hidden">
+          <PlanSectionHeader
+            icon={<Zap className="size-5 text-amber-500" />}
+            title="Facility Optimiser"
+            description="Recommend best facilities per stream based on distance, cost, and carbon."
+            status={optimiserStatus}
+            sticky={false}
+          />
+          <CardContent className="px-4 py-3 md:py-2">
+            {/* Desktop: [Sliders] [Run + last run]. Mobile: [Run] [Sliders grid] [Last run] */}
+            <div className="flex flex-col gap-4 md:flex-row md:flex-wrap md:items-center md:justify-between md:gap-4">
+              {/* Run button: full width on mobile, shrink on desktop */}
+              <div className="w-full md:w-auto md:order-2 md:flex md:items-center md:gap-3">
                 <Button
                   onClick={handleRunClick}
                   disabled={runLoading || loading || noStreams || noFacilities}
-                  className="gap-2"
+                  className="w-full gap-2 md:w-auto"
                 >
                   {runLoading
                     ? runPhase === "computing"
@@ -398,24 +441,84 @@ export default function ProjectOptimiserPage() {
                     : "Run optimiser"}
                 </Button>
                 {lastRunAt != null && (
-                  <span className="text-xs text-muted-foreground">
+                  <span className="mt-2 block text-xs text-muted-foreground md:mt-0 md:inline">
                     Last run: {new Date(lastRunAt).toLocaleTimeString()}
                   </span>
                 )}
               </div>
+              {/* Sliders: 2-col grid on small, single column when very narrow; on desktop inline */}
+              <div className="grid w-full grid-cols-1 min-[360px]:grid-cols-2 gap-3 md:order-1 md:flex md:flex-wrap md:items-center md:gap-4 md:w-auto">
+                <div className="flex items-center gap-2 w-full max-w-[140px] min-w-0">
+                  <Label className="text-xs text-muted-foreground whitespace-nowrap shrink-0">Distance</Label>
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.1}
+                    value={weightDistance}
+                    onChange={(e) => setWeightDistance(Number(e.target.value))}
+                    className="h-2 w-full max-w-20 min-w-0 shrink rounded-full accent-primary"
+                  />
+                  <span className="text-xs tabular-nums w-6 shrink-0">{weightDistance.toFixed(1)}</span>
+                </div>
+                <div className="flex items-center gap-2 w-full max-w-[140px] min-w-0">
+                  <Label className="text-xs text-muted-foreground whitespace-nowrap shrink-0">Cost</Label>
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.1}
+                    value={weightCost}
+                    onChange={(e) => setWeightCost(Number(e.target.value))}
+                    className="h-2 w-full max-w-20 min-w-0 shrink rounded-full accent-primary"
+                  />
+                  <span className="text-xs tabular-nums w-6 shrink-0">{weightCost.toFixed(1)}</span>
+                </div>
+                <div className="flex items-center gap-2 w-full max-w-[140px] min-w-0">
+                  <Label className="text-xs text-muted-foreground whitespace-nowrap shrink-0">Carbon</Label>
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.1}
+                    value={weightCarbon}
+                    onChange={(e) => setWeightCarbon(Number(e.target.value))}
+                    className="h-2 w-full max-w-20 min-w-0 shrink rounded-full accent-primary"
+                  />
+                  <span className="text-xs tabular-nums w-6 shrink-0">{weightCarbon.toFixed(1)}</span>
+                </div>
+                <div className="flex items-center gap-2 w-full max-w-[140px] min-w-0">
+                  <Label className="text-xs text-muted-foreground whitespace-nowrap shrink-0">Diversion</Label>
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.1}
+                    value={weightDiversion}
+                    onChange={(e) => setWeightDiversion(Number(e.target.value))}
+                    className="h-2 w-full max-w-20 min-w-0 shrink rounded-full accent-primary"
+                  />
+                  <span className="text-xs tabular-nums w-6 shrink-0">{weightDiversion.toFixed(1)}</span>
+                </div>
+              </div>
             </div>
-          </CardHeader>
+          </CardContent>
         </Card>
 
         {!loading && !noStreams && !noFacilities ? (
-          <Card className="border-border/50 shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base flex items-center gap-2">
-                <MapPin className="size-4 text-muted-foreground" />
-                Location status
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
+          <Card className="border-border/50 shadow-sm overflow-hidden">
+            <PlanSectionHeader
+              icon={<MapPin className="size-5" />}
+              title="Location status"
+              description="Project and facility geocoding for distance-based ranking."
+              status={
+                status?.project_geocoded && (status?.facilities_geocoded ?? 0) >= (status?.facilities_total ?? 0)
+                  ? "complete"
+                  : "needs_attention"
+              }
+              sticky={false}
+            />
+            <CardContent className="px-6 pb-6 space-y-3 pt-3">
               {geoProgress ? (
                 <p className="text-sm text-muted-foreground">{geoProgress}</p>
               ) : null}
@@ -510,30 +613,82 @@ export default function ProjectOptimiserPage() {
           </Card>
         ) : !hasResults ? (
           <Card className="border-border/50">
-            <CardContent className="p-8 text-center space-y-3">
-              <p className="text-muted-foreground">Click &quot;Run optimiser&quot; to see recommended facilities per stream.</p>
-              {distancesNotYetComputed && (
-                <p className="text-sm text-muted-foreground">
-                  Distances are not computed yet. Run will compute them first, then rank facilities by distance.
-                </p>
-              )}
+            <CardContent className="p-8">
+              <div className="flex flex-col gap-6 max-w-md mx-auto">
+                <p className="text-sm text-muted-foreground text-center">Follow these steps to get facility recommendations.</p>
+                <ol className="space-y-4">
+                  <li className="flex items-start gap-3">
+                    <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary font-semibold text-sm">1</span>
+                    <div>
+                      <p className="font-medium text-foreground">Geocode</p>
+                      <p className="text-sm text-muted-foreground">Set project location and geocode facilities so we can compute distances.</p>
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={geoAction !== "idle" || status?.project_geocoded || !status?.project_has_address}
+                          onClick={handleGeocodeProject}
+                        >
+                          Geocode project
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={geoAction !== "idle" || (status?.facility_ids_without_geocode?.length ?? 0) === 0}
+                          onClick={handleGeocodeMissingFacilities}
+                        >
+                          Geocode facilities
+                        </Button>
+                      </div>
+                    </div>
+                  </li>
+                  <li className="flex items-start gap-3">
+                    <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary font-semibold text-sm">2</span>
+                    <div>
+                      <p className="font-medium text-foreground">Compute distances</p>
+                      <p className="text-sm text-muted-foreground">Calculate project → facility distances (or run optimiser to do this automatically).</p>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="mt-2"
+                        disabled={geoAction !== "idle" || (status?.facilities_total ?? 0) === 0}
+                        onClick={handleRecomputeDistances}
+                      >
+                        Recompute distances
+                      </Button>
+                    </div>
+                  </li>
+                  <li className="flex items-start gap-3">
+                    <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary font-semibold text-sm">3</span>
+                    <div>
+                      <p className="font-medium text-foreground">Run optimiser</p>
+                      <p className="text-sm text-muted-foreground">Rank facilities by distance, cost, and carbon using the weights above.</p>
+                      <Button
+                        className="mt-2 gap-2"
+                        disabled={runLoading || loading || noStreams || noFacilities}
+                        onClick={handleRunClick}
+                      >
+                        {runLoading ? (runPhase === "computing" ? "Computing distances…" : "Ranking facilities…") : "Run optimiser"}
+                      </Button>
+                    </div>
+                  </li>
+                </ol>
+              </div>
             </CardContent>
           </Card>
         ) : (
           <>
             <Card className="border-border/50 overflow-hidden">
-              <div className="overflow-x-auto">
-                <Table>
+              <div className="overflow-x-auto" style={{ minWidth: 0 }}>
+                <Table className="min-w-[640px]">
                   <TableHeader>
                     <TableRow className="border-border/50">
-                      <TableHead className="font-medium">Waste stream</TableHead>
-                      <TableHead className="text-right font-medium">Planned (t)</TableHead>
-                      <TableHead className="font-medium">Recommended facility</TableHead>
-                      <TableHead className="text-right font-medium">Distance</TableHead>
-                      <TableHead className="text-right font-medium">Cost</TableHead>
-                      <TableHead className="text-right font-medium">Carbon</TableHead>
-                      <TableHead className="font-medium">Reason</TableHead>
-                      <TableHead className="w-[100px] font-medium">Alternatives</TableHead>
+                      <TableHead className="min-w-[80px] font-medium">Stream</TableHead>
+                      <TableHead className="min-w-[140px] font-medium">Facility</TableHead>
+                      <TableHead className="min-w-[72px] text-center font-medium">Score</TableHead>
+                      <TableHead className="min-w-[72px] text-right font-medium">Distance</TableHead>
+                      <TableHead className="min-w-[72px] text-right font-medium">Carbon</TableHead>
+                      <TableHead className="min-w-[160px] font-medium">Reason</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -544,10 +699,11 @@ export default function ProjectOptimiserPage() {
                           ? { facility_id: row.recommended_facility_id, facility_name: row.recommended_facility_name }
                           : null);
                       const selectValue = selectedId || row.recommended_facility_id || "";
+                      const explainOpen = expandedExplainStream === row.stream_name;
                       return (
-                        <TableRow key={row.stream_name} className="border-border/50">
+                        <React.Fragment key={row.stream_name}>
+                        <TableRow className="border-border/50">
                           <TableCell className="font-medium">{row.stream_name}</TableCell>
-                          <TableCell className="text-right tabular-nums">{row.planned_tonnes.toFixed(1)}</TableCell>
                           <TableCell>
                             <Select
                               value={selectValue || "__none__"}
@@ -585,8 +741,28 @@ export default function ProjectOptimiserPage() {
                               </SelectContent>
                             </Select>
                           </TableCell>
+                          <TableCell className="text-center align-top">
+                            {row.score != null && row.recommended_facility_id && selectedId === row.recommended_facility_id ? (
+                              <span
+                                className={cn(
+                                  "inline-flex items-center justify-center rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums",
+                                  row.score >= 0.7 && "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
+                                  row.score >= 0.4 && row.score < 0.7 && "bg-amber-500/15 text-amber-700 dark:text-amber-400",
+                                  row.score > 0 && row.score < 0.4 && "bg-rose-500/15 text-rose-700 dark:text-rose-400",
+                                  row.score === 0 && "bg-muted text-muted-foreground"
+                                )}
+                                title="Composite score 0–1 (higher is better)"
+                              >
+                                {Math.round((row.score ?? 0) * 100)}%
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
+                          </TableCell>
                           <TableCell className="text-right tabular-nums text-muted-foreground align-top">
-                            {row.distance_km != null ? (
+                            {runLoading ? (
+                              <span className="text-muted-foreground">…</span>
+                            ) : row.distance_km != null ? (
                               <span
                                 title={row.duration_min != null ? `~${Math.round(row.duration_min)} min drive` : undefined}
                               >
@@ -667,7 +843,7 @@ export default function ProjectOptimiserPage() {
                               }
                               return (
                                 <span className="block text-amber-600 dark:text-amber-500">
-                                  <span title="Distances not computed yet. Recompute to refresh.">Not computed</span>
+                                  <span title="Run optimiser again to compute distances, or use Recompute distances in Location status.">Not computed</span>
                                   <button
                                     type="button"
                                     onClick={handleRecomputeDistances}
@@ -683,47 +859,48 @@ export default function ProjectOptimiserPage() {
                             )}
                           </TableCell>
                           <TableCell className="text-right tabular-nums text-muted-foreground">
-                            {row.estimated_cost != null ? `$${row.estimated_cost.toFixed(0)}` : "—"}
-                          </TableCell>
-                          <TableCell className="text-right tabular-nums text-muted-foreground">
                             {row.estimated_carbon != null ? `${row.estimated_carbon.toFixed(2)} tCO2e` : "—"}
                           </TableCell>
-                          <TableCell>
-                            <span
-                              title={row.reason.breakdown?.length ? row.reason.breakdown.join("\n") : row.reason.primary}
-                              className="inline-flex items-center gap-1 text-sm text-muted-foreground cursor-help"
-                            >
-                              {row.reason.primary}
-                              <Info className="size-3.5 shrink-0" aria-hidden />
-                            </span>
-                          </TableCell>
-                          <TableCell>
-                            {row.alternatives.length > 0 ? (
-                              <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                  <Button variant="ghost" size="sm" className="h-8 gap-1 text-xs">
-                                    View top 3
-                                    <ChevronDown className="size-3" />
-                                  </Button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent align="end" className="w-56">
-                                  {row.alternatives.map((alt, i) => (
-                                    <DropdownMenuItem key={alt.facility_id} disabled>
-                                      <span className="font-medium">{alt.facility_name}</span>
-                                      {alt.distance_km != null && (
-                                        <span className="text-muted-foreground ml-1">
-                                          {alt.distance_km} km
-                                        </span>
-                                      )}
-                                    </DropdownMenuItem>
-                                  ))}
-                                </DropdownMenuContent>
-                              </DropdownMenu>
-                            ) : (
-                              <span className="text-xs text-muted-foreground">—</span>
-                            )}
+                          <TableCell className="min-w-0 w-[1%] align-top">
+                            <div className="flex flex-col gap-1 min-w-0">
+                              <button
+                                type="button"
+                                onClick={() => setExpandedExplainStream(explainOpen ? null : row.stream_name)}
+                                className={cn(
+                                  "inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline text-left whitespace-nowrap",
+                                  explainOpen && "text-foreground"
+                                )}
+                              >
+                                {explainOpen ? (
+                                  <ChevronDown className="size-4 shrink-0" aria-hidden />
+                                ) : (
+                                  <ChevronRight className="size-4 shrink-0" aria-hidden />
+                                )}
+                                Explain recommendation
+                              </button>
+                              <span
+                                title={row.reason.breakdown?.length ? row.reason.breakdown.join("\n") : row.reason.primary}
+                                className="line-clamp-2 text-xs text-muted-foreground"
+                              >
+                                {row.reason.primary}
+                                <Info className="size-3.5 inline shrink-0 align-middle ml-0.5" aria-hidden />
+                              </span>
+                            </div>
                           </TableCell>
                         </TableRow>
+                        {explainOpen && (
+                          <TableRow className="border-border/50 bg-muted/20 hover:bg-muted/20">
+                            <TableCell colSpan={6} className="py-4 px-6">
+                              <p className="text-sm font-medium text-foreground mb-2">Why this facility ranked highest</p>
+                              <ul className="list-disc list-inside text-sm text-muted-foreground space-y-1">
+                                {(row.reason.breakdown ?? [row.reason.primary]).map((line, i) => (
+                                  <li key={i}>{line}</li>
+                                ))}
+                              </ul>
+                            </TableCell>
+                          </TableRow>
+                        )}
+                        </React.Fragment>
                       );
                     })}
                   </TableBody>
@@ -731,19 +908,36 @@ export default function ProjectOptimiserPage() {
               </div>
             </Card>
 
-            <div className="flex flex-wrap items-center gap-4">
+            <div className="flex flex-wrap items-center gap-3">
               <Button
+                onClick={handleAutoApply}
+                disabled={applyLoading}
+                variant="default"
+                className="gap-2 shrink-0"
+              >
+                <CheckCircle2 className="size-4" />
+                {applyLoading ? "Applying…" : "Auto-apply recommendations"}
+              </Button>
+              <Button
+                variant="outline"
                 onClick={() => setApplyDialogOpen(true)}
                 disabled={applyLoading}
-                className="gap-2"
+                className="gap-2 shrink-0"
               >
                 <MapPin className="size-4" />
-                {applyLoading ? "Applying…" : "Apply recommendations"}
+                Apply selected
               </Button>
-              <p className="text-sm text-muted-foreground">
-                This will update stream → facility assignments in your project plan.
+              <p className="text-sm text-muted-foreground min-w-0 basis-full sm:basis-auto">
+                Auto-apply uses the recommended facility per stream; Apply selected uses your table choices.
               </p>
             </div>
+            {typeof process.env.NEXT_PUBLIC_DEBUG_DISTANCES !== "undefined" &&
+              process.env.NEXT_PUBLIC_DEBUG_DISTANCES === "true" &&
+              debugDistances != null && (
+              <p className="text-xs text-muted-foreground mt-2" aria-hidden>
+                Distances loaded: {debugDistances.loaded}/{debugDistances.total}
+              </p>
+            )}
           </>
         )}
       </div>

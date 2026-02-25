@@ -47,6 +47,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+  TooltipProvider,
+} from "@/components/ui/tooltip";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { PriorityChip, type PriorityLevel } from "@/components/ui/priority-chip";
@@ -55,11 +62,12 @@ import { useProjectContext } from "@/app/projects/[id]/project-context";
 import { StreamPlanningCards, type OptimiserStream, type StreamFilterState } from "./stream-planning-cards";
 import { isRecommendationResolved } from "./recommendation-helpers";
 import { toast } from "sonner";
-import { CheckCircle2, Circle, AlertCircle, FileDown, ListChecks, RefreshCw } from "lucide-react";
+import { CheckCircle2, Circle, AlertCircle, FileDown, ListChecks, RefreshCw, LayoutDashboard, Flame, Target, Recycle, FileText, BookOpen, HelpCircle, Fuel, Zap } from "lucide-react";
+import { PlanSectionHeader } from "@/components/plan-section-header";
 
 const CARD_CLASS =
   "overflow-hidden rounded-xl border border-border shadow-sm print:shadow-none print:border print:bg-white";
-const SECTION_SPACE = "space-y-10";
+const SECTION_SPACE = "space-y-8";
 
 /** Catches render errors in a section so one broken section does not blank the whole Report page. */
 class SectionErrorBoundary extends React.Component<
@@ -220,11 +228,6 @@ function RecommendationDetail({
                         {impact.cost_savings_nzd_range && (
                           <li>
                             Cost: ${impact.cost_savings_nzd_range[0]} – ${impact.cost_savings_nzd_range[1]} NZD
-                          </li>
-                        )}
-                        {impact.carbon_savings_tco2e_range && (
-                          <li>
-                            Carbon: {impact.carbon_savings_tco2e_range[0]} – {impact.carbon_savings_tco2e_range[1]} tCO2e
                           </li>
                         )}
                         {notes.map((n, k) => (
@@ -589,16 +592,6 @@ export default function SwmpPage() {
     return { byStream, unallocated, conversionRequired };
   }, [forecastItems]);
 
-  const setExportMode = useCallback(
-    (on: boolean) => {
-      const next = new URLSearchParams(searchParams.toString());
-      if (on) next.set("export", "1");
-      else next.delete("export");
-      router.replace(`/projects/${projectId}/swmp?${next.toString()}`, { scroll: false });
-    },
-    [projectId, router, searchParams]
-  );
-
   const handlePlanPatch = useCallback(
     async (
       streamName: string,
@@ -769,6 +762,26 @@ export default function SwmpPage() {
     ]
   );
 
+  const { machineryTotalKg, energyTotalKg, totalCarbonKg } = useMemo(() => {
+    const mach = carbonVehicleEntries.reduce(
+      (s, e) =>
+        s +
+        (Number(e.time_active_hours) || 0) *
+          (e.factor?.avg_consumption_per_hr ?? 0) *
+          (e.factor?.conversion_factor_kgco2e_per_unit ?? 0),
+      0
+    );
+    const en = carbonResourceEntries.reduce(
+      (s, e) => s + (Number(e.quantity_used) || 0) * (e.factor?.conversion_factor_kgco2e_per_unit ?? 0),
+      0
+    );
+    return {
+      machineryTotalKg: Math.round(mach * 100) / 100,
+      energyTotalKg: Math.round(en * 100) / 100,
+      totalCarbonKg: Math.round((mach + en) * 100) / 100,
+    };
+  }, [carbonVehicleEntries, carbonResourceEntries]);
+
   const validSection = ["overview", "strategy", "streams", "narrative", "carbon", "appendix"].includes(section)
     ? section
     : "overview";
@@ -798,7 +811,7 @@ export default function SwmpPage() {
     );
   }
 
-  const showSection = (s: ReportSection) => exportMode || validSection === s;
+  const showSection = (s: ReportSection) => validSection === s;
 
   return (
     <AppShell>
@@ -849,7 +862,7 @@ export default function SwmpPage() {
 
         <ReportSectionHeader
           currentSection={validSection}
-          exportMode={exportMode}
+          exportMode={false}
         />
 
         {((wasteStrategy?.conversionsUsed?.usedFallback) ||
@@ -883,10 +896,14 @@ export default function SwmpPage() {
           {/* ---------- OVERVIEW ---------- */}
           {showSection("overview") && (
             <section id="outputs-overview" className="print:break-before-auto">
-              <h1 className="text-2xl font-semibold mb-2">Overview</h1>
-              <p className="text-sm text-muted-foreground mb-6">
-                Key metrics and top recommendations at a glance.
-              </p>
+              <PlanSectionHeader
+                icon={<LayoutDashboard className="size-5" />}
+                title="Overview"
+                description="Key metrics and top recommendations at a glance."
+                status={planningChecklist?.readiness_score === 100 ? "complete" : planningChecklist ? "needs_attention" : undefined}
+                sticky={true}
+                className="mb-4 print:static"
+              />
               <SectionErrorBoundary sectionId="overview">
               <div className={SECTION_SPACE}>
                 {/* Planning Checklist */}
@@ -958,16 +975,6 @@ export default function SwmpPage() {
                           );
                         })}
                       </ul>
-                      {planningChecklist.readiness_score === 100 && planningChecklist.items.some((i) => i.key === "export_ready" && i.status === "complete") && (
-                        <div className="pt-2">
-                          <Button variant="default" size="lg" className="w-full sm:w-auto" asChild>
-                            <Link href={`/projects/${projectId}/swmp?export=1`}>
-                              <FileDown className="size-4 mr-2" />
-                              Export SWMP
-                            </Link>
-                          </Button>
-                        </div>
-                      )}
                     </CardContent>
                   </Card>
                 ) : null}
@@ -1045,13 +1052,17 @@ export default function SwmpPage() {
           </section>
           )}
 
-          {/* ---------- CARBON FORECAST (site operations) — only on Carbon Forecast tab (or in export/print) ---------- */}
+          {/* ---------- CARBON FORECAST (site operations) — only on Carbon Forecast tab ---------- */}
           {showSection("carbon") && (
             <section id="outputs-carbon-forecast" className="print:break-before-auto print:break-inside-avoid">
-              <h1 className="text-2xl font-semibold mb-2">Carbon forecast (site operations)</h1>
-              <p className="text-sm text-muted-foreground mb-6">
-                Machinery, vehicles, water, energy and fuel emissions (kg CO₂e).
-              </p>
+              <PlanSectionHeader
+                icon={<Flame className="size-5" />}
+                title="Carbon forecast (site operations)"
+                description="Machinery, vehicles, water, energy and fuel emissions (kg CO₂e)."
+                status={!carbonLoading && (carbonVehicleEntries.length > 0 || carbonResourceEntries.length > 0) ? "complete" : carbonLoading ? undefined : "needs_attention"}
+                sticky={true}
+                className="mb-4 print:static"
+              />
               <SectionErrorBoundary sectionId="carbon-forecast">
                 {carbonLoading ? (
                   <Card className={CARD_CLASS}>
@@ -1061,134 +1072,214 @@ export default function SwmpPage() {
                   </Card>
                 ) : (carbonVehicleEntries.length > 0 || carbonResourceEntries.length > 0) ? (
                   <div className={cn(SECTION_SPACE, "print:break-inside-avoid")}>
-                    {carbonVehicleEntries.length > 0 && (
-                      <Card className={CARD_CLASS}>
-                        <CardHeader>
-                          <CardTitle className="text-lg">Machinery &amp; vehicles</CardTitle>
-                        </CardHeader>
-                        <CardContent className="p-0 sm:p-6 sm:pt-0 overflow-x-auto">
-                          <Table>
-                            <TableHeader>
-                              <TableRow className="bg-muted/50">
-                                <TableHead className="break-words">Item</TableHead>
-                                <TableHead className="w-24">Fuel type</TableHead>
-                                <TableHead className="text-right w-20">Time (hrs)</TableHead>
-                                <TableHead className="text-right w-20">Consumption/hr</TableHead>
-                                <TableHead className="w-16">Unit</TableHead>
-                                <TableHead className="text-right w-20">kg CO₂e/unit</TableHead>
-                                <TableHead className="text-right w-24">Emissions (kg CO₂e)</TableHead>
-                              </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                              {carbonVehicleEntries.map((e) => {
-                                const t = Number(e.time_active_hours) || 0;
-                                const c = e.factor?.avg_consumption_per_hr ?? 0;
-                                const k = e.factor?.conversion_factor_kgco2e_per_unit ?? 0;
-                                const emissions = t * c * k;
-                                const itemLabel = [e.factor?.name, e.factor?.weight_range ? `(${e.factor.weight_range})` : ""].filter(Boolean).join(" ");
-                                return (
-                                  <TableRow key={e.id}>
-                                    <TableCell className="break-words">{itemLabel || "—"}</TableCell>
-                                    <TableCell>{e.factor?.fuel_type ?? "—"}</TableCell>
-                                    <TableCell className="text-right tabular-nums">{t.toFixed(2)}</TableCell>
-                                    <TableCell className="text-right tabular-nums">{c}</TableCell>
-                                    <TableCell>{e.factor?.consumption_unit ?? "—"}</TableCell>
-                                    <TableCell className="text-right tabular-nums">{k}</TableCell>
-                                    <TableCell className="text-right tabular-nums">{(Math.round(emissions * 100) / 100).toFixed(2)}</TableCell>
-                                  </TableRow>
-                                );
-                              })}
-                            </TableBody>
-                          </Table>
-                          <div className="border-t bg-muted/30 px-4 py-2 text-right text-sm font-medium">
-                            Machinery subtotal:{" "}
-                            <span className="tabular-nums">
-                              {(
-                                Math.round(
-                                  carbonVehicleEntries.reduce((sum, e) => {
-                                    const t = Number(e.time_active_hours) || 0;
-                                    const c = e.factor?.avg_consumption_per_hr ?? 0;
-                                    const k = e.factor?.conversion_factor_kgco2e_per_unit ?? 0;
-                                    return sum + t * c * k;
-                                  },
-                                  0
-                                ) * 100
-                              ) / 100).toFixed(2)}{" "}
-                              kg CO₂e
-                            </span>
+                    <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground border-b border-border pb-2 mb-4">
+                      Operational Carbon Forecast
+                    </h2>
+
+                    {/* Scope proxy breakdown bar */}
+                    {totalCarbonKg > 0 && (
+                      <div className="space-y-2 mb-4">
+                        <p className="text-xs font-medium text-muted-foreground">Scope proxy</p>
+                        <div className="flex h-6 w-full rounded-md overflow-hidden bg-muted/50 border border-border/50">
+                          <div
+                            className="h-full bg-amber-500/80 dark:bg-amber-600/80 transition-all duration-500 flex items-center justify-center min-w-0"
+                            style={{
+                              width: `${(machineryTotalKg / totalCarbonKg) * 100}%`,
+                            }}
+                            title={`Machinery: ${((machineryTotalKg / totalCarbonKg) * 100).toFixed(1)}%`}
+                          >
+                            {(machineryTotalKg / totalCarbonKg) * 100 >= 15 && (
+                              <span className="text-[10px] font-medium text-amber-950 dark:text-amber-100 truncate px-1">
+                                Machinery {((machineryTotalKg / totalCarbonKg) * 100).toFixed(0)}%
+                              </span>
+                            )}
                           </div>
-                        </CardContent>
-                      </Card>
-                    )}
-                    {carbonResourceEntries.length > 0 && (
-                      <Card className={CARD_CLASS}>
-                        <CardHeader>
-                          <CardTitle className="text-lg">Water, energy &amp; fuel</CardTitle>
-                        </CardHeader>
-                        <CardContent className="p-0 sm:p-6 sm:pt-0 overflow-x-auto">
-                          <Table>
-                            <TableHeader>
-                              <TableRow className="bg-muted/50">
-                                <TableHead className="break-words">Item</TableHead>
-                                <TableHead className="w-20">Category</TableHead>
-                                <TableHead className="text-right w-20">Quantity used</TableHead>
-                                <TableHead className="w-16">Unit</TableHead>
-                                <TableHead className="text-right w-20">kg CO₂e/unit</TableHead>
-                                <TableHead className="text-right w-24">Emissions (kg CO₂e)</TableHead>
-                              </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                              {carbonResourceEntries.map((e) => {
-                                const q = Number(e.quantity_used) || 0;
-                                const k = e.factor?.conversion_factor_kgco2e_per_unit ?? 0;
-                                const emissions = q * k;
-                                return (
-                                  <TableRow key={e.id}>
-                                    <TableCell className="break-words">{e.factor?.name ?? "—"}</TableCell>
-                                    <TableCell>{e.factor?.category ?? "—"}</TableCell>
-                                    <TableCell className="text-right tabular-nums">{q.toFixed(2)}</TableCell>
-                                    <TableCell>{e.factor?.unit ?? "—"}</TableCell>
-                                    <TableCell className="text-right tabular-nums">{k}</TableCell>
-                                    <TableCell className="text-right tabular-nums">{(Math.round(emissions * 100) / 100).toFixed(2)}</TableCell>
-                                  </TableRow>
-                                );
-                              })}
-                            </TableBody>
-                          </Table>
-                          <div className="border-t bg-muted/30 px-4 py-2 text-right text-sm font-medium">
-                            Water/Energy/Fuel subtotal:{" "}
-                            <span className="tabular-nums">
-                              {(
-                                Math.round(
-                                  carbonResourceEntries.reduce((sum, e) => {
-                                    const q = Number(e.quantity_used) || 0;
-                                    const k = e.factor?.conversion_factor_kgco2e_per_unit ?? 0;
-                                    return sum + q * k;
-                                  },
-                                  0
-                                ) * 100
-                              ) / 100).toFixed(2)}{" "}
-                              kg CO₂e
-                            </span>
+                          <div
+                            className="h-full bg-blue-500/80 dark:bg-blue-600/80 transition-all duration-500 flex items-center justify-center min-w-0"
+                            style={{
+                              width: `${(energyTotalKg / totalCarbonKg) * 100}%`,
+                            }}
+                            title={`Energy: ${((energyTotalKg / totalCarbonKg) * 100).toFixed(1)}%`}
+                          >
+                            {(energyTotalKg / totalCarbonKg) * 100 >= 15 && (
+                              <span className="text-[10px] font-medium text-blue-950 dark:text-blue-100 truncate px-1">
+                                Energy {((energyTotalKg / totalCarbonKg) * 100).toFixed(0)}%
+                              </span>
+                            )}
                           </div>
-                        </CardContent>
-                      </Card>
-                    )}
-                    {(carbonVehicleEntries.length > 0 || carbonResourceEntries.length > 0) && (
-                      <div className="rounded-lg border border-border bg-muted/30 p-4 print:break-inside-avoid">
-                        <p className="text-sm font-semibold tabular-nums">
-                          Total operational emissions:{" "}
-                          {(
-                            Math.round(
-                              (carbonVehicleEntries.reduce((s, e) => s + (Number(e.time_active_hours) || 0) * (e.factor?.avg_consumption_per_hr ?? 0) * (e.factor?.conversion_factor_kgco2e_per_unit ?? 0), 0) +
-                                carbonResourceEntries.reduce((s, e) => s + (Number(e.quantity_used) || 0) * (e.factor?.conversion_factor_kgco2e_per_unit ?? 0), 0)) *
-                              100
-                            ) / 100
-                          ).toFixed(2)}{" "}
-                          kg CO₂e
-                        </p>
+                        </div>
                       </div>
                     )}
+
+                    <TooltipProvider delayDuration={200}>
+                    <Tabs defaultValue="machinery" className="w-full">
+                      <TabsList className="mb-4 print:border print:bg-muted/30">
+                        <TabsTrigger value="machinery" className="gap-2">
+                          <Fuel className="size-4" />
+                          Machinery
+                        </TabsTrigger>
+                        <TabsTrigger value="energy" className="gap-2">
+                          <Zap className="size-4" />
+                          Water &amp; Energy
+                        </TabsTrigger>
+                      </TabsList>
+
+                      <TabsContent value="machinery" className="mt-0">
+                        {carbonVehicleEntries.length > 0 ? (
+                          <Card className={CARD_CLASS}>
+                            <CardContent className="p-0 sm:p-6 sm:pt-0 overflow-x-auto">
+                              <Table>
+                                  <TableHeader>
+                                    <TableRow className="bg-muted/50">
+                                      <TableHead className="break-words">Item</TableHead>
+                                      <TableHead className="w-24">Fuel type</TableHead>
+                                      <TableHead className="text-right w-20">
+                                        <span className="inline-flex items-center gap-1">
+                                          Time (hrs)
+                                          <Tooltip>
+                                            <TooltipTrigger asChild>
+                                              <button type="button" className="inline-flex size-4 shrink-0 rounded text-muted-foreground hover:text-foreground" aria-label="Time active help">
+                                                <HelpCircle className="size-3.5" />
+                                              </button>
+                                            </TooltipTrigger>
+                                            <TooltipContent side="top" className="max-w-[220px]">
+                                              <p><strong>Time active?</strong> Hours the machinery or vehicle was in use. Emissions = time × consumption per hour × kg CO₂e per unit.</p>
+                                            </TooltipContent>
+                                          </Tooltip>
+                                        </span>
+                                      </TableHead>
+                                      <TableHead className="text-right w-20">Consumption/hr</TableHead>
+                                      <TableHead className="w-16">Unit</TableHead>
+                                      <TableHead className="text-right w-20">
+                                        <span className="inline-flex items-center gap-1">
+                                          kg CO₂e/unit
+                                          <Tooltip>
+                                            <TooltipTrigger asChild>
+                                              <button type="button" className="inline-flex size-4 shrink-0 rounded text-muted-foreground hover:text-foreground" aria-label="kgCO2e per unit help">
+                                                <HelpCircle className="size-3.5" />
+                                              </button>
+                                            </TooltipTrigger>
+                                            <TooltipContent side="top" className="max-w-[220px]">
+                                              <p><strong>kg CO₂e/unit?</strong> Conversion factor from fuel or energy unit to kilograms of CO₂ equivalent. Enables total emissions to be calculated from usage.</p>
+                                            </TooltipContent>
+                                          </Tooltip>
+                                        </span>
+                                      </TableHead>
+                                      <TableHead className="text-right w-24">Emissions (kg CO₂e)</TableHead>
+                                    </TableRow>
+                                  </TableHeader>
+                                  <TableBody>
+                                    {carbonVehicleEntries.map((e) => {
+                                      const t = Number(e.time_active_hours) || 0;
+                                      const c = e.factor?.avg_consumption_per_hr ?? 0;
+                                      const k = e.factor?.conversion_factor_kgco2e_per_unit ?? 0;
+                                      const emissions = t * c * k;
+                                      const itemLabel = [e.factor?.name, e.factor?.weight_range ? `(${e.factor.weight_range})` : ""].filter(Boolean).join(" ");
+                                      return (
+                                        <TableRow key={e.id}>
+                                          <TableCell className="break-words">{itemLabel || "—"}</TableCell>
+                                          <TableCell>{e.factor?.fuel_type ?? "—"}</TableCell>
+                                          <TableCell className="text-right tabular-nums">{t.toFixed(2)}</TableCell>
+                                          <TableCell className="text-right tabular-nums">{c}</TableCell>
+                                          <TableCell>{e.factor?.consumption_unit ?? "—"}</TableCell>
+                                          <TableCell className="text-right tabular-nums">{k}</TableCell>
+                                          <TableCell className="text-right tabular-nums">
+                                            <span key={emissions} className="tabular-nums inline-block animate-in fade-in-0 duration-300">
+                                              {(Math.round(emissions * 100) / 100).toFixed(2)}
+                                            </span>
+                                          </TableCell>
+                                        </TableRow>
+                                      );
+                                    })}
+                                  </TableBody>
+                                </Table>
+                              <div className="border-t bg-muted/30 px-4 py-2 text-right text-sm font-medium">
+                                Machinery subtotal:{" "}
+                                <span key={machineryTotalKg} className="tabular-nums inline-block animate-in fade-in-0 duration-300">
+                                  {machineryTotalKg.toFixed(2)} kg CO₂e
+                                </span>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        ) : (
+                          <p className="text-sm text-muted-foreground py-4">No machinery or vehicle entries.</p>
+                        )}
+                      </TabsContent>
+
+                      <TabsContent value="energy" className="mt-0">
+                        {carbonResourceEntries.length > 0 ? (
+                          <Card className={CARD_CLASS}>
+                            <CardContent className="p-0 sm:p-6 sm:pt-0 overflow-x-auto">
+                              <Table>
+                                  <TableHeader>
+                                    <TableRow className="bg-muted/50">
+                                      <TableHead className="break-words">Item</TableHead>
+                                      <TableHead className="w-20">Category</TableHead>
+                                      <TableHead className="text-right w-20">Quantity used</TableHead>
+                                      <TableHead className="w-16">Unit</TableHead>
+                                      <TableHead className="text-right w-20">
+                                        <span className="inline-flex items-center gap-1">
+                                          kg CO₂e/unit
+                                          <Tooltip>
+                                            <TooltipTrigger asChild>
+                                              <button type="button" className="inline-flex size-4 shrink-0 rounded text-muted-foreground hover:text-foreground" aria-label="kgCO2e per unit help">
+                                                <HelpCircle className="size-3.5" />
+                                              </button>
+                                            </TooltipTrigger>
+                                            <TooltipContent side="top" className="max-w-[220px]">
+                                              <p><strong>kg CO₂e/unit?</strong> Conversion factor from the resource unit (e.g. kWh, m³) to kilograms of CO₂ equivalent. Enables total emissions from quantity used.</p>
+                                            </TooltipContent>
+                                          </Tooltip>
+                                        </span>
+                                      </TableHead>
+                                      <TableHead className="text-right w-24">Emissions (kg CO₂e)</TableHead>
+                                    </TableRow>
+                                  </TableHeader>
+                                  <TableBody>
+                                    {carbonResourceEntries.map((e) => {
+                                      const q = Number(e.quantity_used) || 0;
+                                      const k = e.factor?.conversion_factor_kgco2e_per_unit ?? 0;
+                                      const emissions = q * k;
+                                      return (
+                                        <TableRow key={e.id}>
+                                          <TableCell className="break-words">{e.factor?.name ?? "—"}</TableCell>
+                                          <TableCell>{e.factor?.category ?? "—"}</TableCell>
+                                          <TableCell className="text-right tabular-nums">{q.toFixed(2)}</TableCell>
+                                          <TableCell>{e.factor?.unit ?? "—"}</TableCell>
+                                          <TableCell className="text-right tabular-nums">{k}</TableCell>
+                                          <TableCell className="text-right tabular-nums">
+                                            <span key={emissions} className="tabular-nums inline-block animate-in fade-in-0 duration-300">
+                                              {(Math.round(emissions * 100) / 100).toFixed(2)}
+                                            </span>
+                                          </TableCell>
+                                        </TableRow>
+                                      );
+                                    })}
+                                  </TableBody>
+                                </Table>
+                              <div className="border-t bg-muted/30 px-4 py-2 text-right text-sm font-medium">
+                                Water/Energy subtotal:{" "}
+                                <span key={energyTotalKg} className="tabular-nums inline-block animate-in fade-in-0 duration-300">
+                                  {energyTotalKg.toFixed(2)} kg CO₂e
+                                </span>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        ) : (
+                          <p className="text-sm text-muted-foreground py-4">No water, energy or fuel entries.</p>
+                        )}
+                      </TabsContent>
+                    </Tabs>
+                    </TooltipProvider>
+
+                    <div className="rounded-lg border border-border bg-muted/30 p-4 print:break-inside-avoid">
+                      <p className="text-sm font-semibold tabular-nums">
+                        Total operational emissions:{" "}
+                        <span key={totalCarbonKg} className="tabular-nums inline-block animate-in fade-in-0 duration-300">
+                          {totalCarbonKg.toFixed(2)} kg CO₂e
+                        </span>
+                      </p>
+                    </div>
                   </div>
                 ) : (
                   <Card className={CARD_CLASS}>
@@ -1206,10 +1297,14 @@ export default function SwmpPage() {
           {/* ---------- STRATEGY ---------- */}
           {showSection("strategy") && (
             <section id="outputs-strategy" className="print:break-before-auto">
-              <h1 className="text-2xl font-semibold mb-2">Strategy</h1>
-              <p className="text-sm text-muted-foreground mb-6">
-                Waste strategy recommendations and stream plans.
-              </p>
+              <PlanSectionHeader
+                icon={<Target className="size-5" />}
+                title="Strategy"
+                description="Waste strategy recommendations and stream plans."
+                status={wasteStrategy?.recommendations?.length ? "complete" : wasteStrategy ? "needs_attention" : undefined}
+                sticky={true}
+                className="mb-4 print:static"
+              />
               <SectionErrorBoundary sectionId="strategy">
               {strategySectionLoading && !wasteStrategy ? (
                 <Card className={CARD_CLASS}>
@@ -1343,12 +1438,16 @@ export default function SwmpPage() {
           {/* ---------- WASTE STREAMS (planning cards or print table) ---------- */}
           {showSection("streams") && (
             <section id="outputs-streams" className="print:break-before-auto">
-              <h1 className="text-2xl font-semibold mb-2">Waste Streams</h1>
-              <p className="text-sm text-muted-foreground mb-6">
-                {exportMode
+              <PlanSectionHeader
+                icon={<Recycle className="size-5" />}
+                title="Waste Streams"
+                description={exportMode
                   ? "Stream summary with tonnes and destinations."
                   : "Set handling and facility per stream. Use cards to choose facilities and see recommendations."}
-              </p>
+                status={wasteStrategy?.streamPlans?.length ? "complete" : wasteStrategy ? "needs_attention" : undefined}
+                sticky={true}
+                className="mb-4 print:static"
+              />
               <SectionErrorBoundary sectionId="streams">
               {strategySectionLoading && !wasteStrategy ? (
                 <Card className={CARD_CLASS}>
@@ -1530,10 +1629,14 @@ export default function SwmpPage() {
           {/* ---------- NARRATIVE ---------- */}
           {showSection("narrative") && (
             <section id="outputs-narrative" className="print:break-before-auto">
-              <h1 className="text-2xl font-semibold mb-2">Narrative</h1>
-              <p className="text-sm text-muted-foreground mb-6">
-                SWMP summary, methodology, and assumptions.
-              </p>
+              <PlanSectionHeader
+                icon={<FileText className="size-5" />}
+                title="Narrative"
+                description="SWMP summary, methodology, and assumptions."
+                status={wasteStrategy?.narrative ? "complete" : wasteStrategy ? "needs_attention" : undefined}
+                sticky={true}
+                className="mb-4 print:static"
+              />
               <SectionErrorBoundary sectionId="narrative">
               {!wasteStrategy?.narrative ? (
                 <Card className={CARD_CLASS}>
@@ -1631,10 +1734,14 @@ export default function SwmpPage() {
           {/* ---------- APPENDIX ---------- */}
           {showSection("appendix") && (
             <section id="outputs-appendix" className="print:break-before-auto">
-              <h1 className="text-2xl font-semibold mb-2">Appendix</h1>
-              <p className="text-sm text-muted-foreground mb-6">
-                Forecast items by stream, unallocated, and conversion required.
-              </p>
+              <PlanSectionHeader
+                icon={<BookOpen className="size-5" />}
+                title="Appendix"
+                description="Forecast items by stream, unallocated, and conversion required."
+                status={appendixData.byStream.size > 0 ? "complete" : forecastItems.length > 0 ? "needs_attention" : undefined}
+                sticky={true}
+                className="mb-4 print:static"
+              />
               <SectionErrorBoundary sectionId="appendix">
               {forecastSectionLoading && forecastItems.length === 0 ? (
                 <Card className={CARD_CLASS}>
@@ -1644,6 +1751,44 @@ export default function SwmpPage() {
                 </Card>
               ) : (
               <div className={SECTION_SPACE}>
+                {/* Carbon data also appears in Appendix (only here + Carbon Forecast tab) */}
+                <Card className={CARD_CLASS}>
+                  <CardHeader>
+                    <CardTitle className="text-lg">Operational carbon</CardTitle>
+                    <p className="text-sm text-muted-foreground">
+                      Site operations emissions summary. See Carbon Forecast tab for full machinery and energy tables.
+                    </p>
+                  </CardHeader>
+                  <CardContent className="p-6 pt-0">
+                    {totalCarbonKg > 0 ? (
+                      <div className="space-y-3">
+                        <p className="text-sm font-semibold tabular-nums">
+                          Total operational emissions: {totalCarbonKg.toFixed(2)} kg CO₂e
+                        </p>
+                        <div className="flex h-6 w-full overflow-hidden rounded-md border border-border bg-muted/30">
+                          <div
+                            className="bg-amber-500/80 h-full transition-[width]"
+                            style={{ width: `${(machineryTotalKg / totalCarbonKg) * 100}%` }}
+                            title={`Machinery: ${((machineryTotalKg / totalCarbonKg) * 100).toFixed(1)}%`}
+                          />
+                          <div
+                            className="bg-blue-500/80 h-full transition-[width]"
+                            style={{ width: `${(energyTotalKg / totalCarbonKg) * 100}%` }}
+                            title={`Energy: ${((energyTotalKg / totalCarbonKg) * 100).toFixed(1)}%`}
+                          />
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          Machinery & vehicles: {machineryTotalKg.toFixed(2)} kg CO₂e · Water & energy: {energyTotalKg.toFixed(2)} kg CO₂e
+                        </p>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">
+                        No operational carbon data yet. Add machinery, vehicles, water and energy in the Carbon Forecast tab.
+                      </p>
+                    )}
+                  </CardContent>
+                </Card>
+
                 <Card className={CARD_CLASS}>
                   <CardHeader>
                     <CardTitle className="text-lg">Forecast items by stream</CardTitle>
@@ -1810,11 +1955,6 @@ export default function SwmpPage() {
             </section>
           )}
 
-          {exportMode && (
-            <div className="print:hidden flex justify-end">
-              <Button onClick={() => window.print()}>Print / PDF</Button>
-          </div>
-          )}
         </div>
 
       </div>

@@ -216,14 +216,13 @@ export async function getPlanningChecklist(
     cta: !strategyGenerated ? { label: "Open Strategy", href: href(projectId, "/swmp", "?section=strategy") } : undefined,
   });
 
-  // 8) Export ready
+  // 8) Report ready
   const allComplete = items.every((i) => i.status === "complete");
   items.push({
     key: "export_ready",
-    label: "Export ready",
+    label: "Report ready",
     status: allComplete ? "complete" : "incomplete",
-    detail: allComplete ? "Ready to export SWMP" : "Complete the items above first",
-    cta: allComplete ? { label: "Export SWMP", href: href(projectId, "/swmp", "?export=1"), action: "export" } : undefined,
+    detail: allComplete ? "All sections complete" : "Complete the items above first",
   });
 
   // Readiness score: weighted. allocation + conversions + facilities slightly higher (e.g. 15% each), rest ~10% each = 15+15+10+10+10+15+10+15 = 100

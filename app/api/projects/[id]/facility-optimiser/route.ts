@@ -10,6 +10,7 @@ import {
   buildDistanceMapFromRows,
   getDistanceForFacility,
 } from "@/lib/distance/getProjectFacilityDistanceMap";
+import { getProjectFacilityDistances } from "@/lib/distances/getProjectFacilityDistances";
 import {
   computeCostEstimate,
   computeCarbonEstimate,
@@ -279,9 +280,24 @@ export async function POST(req: Request, { params }: Params) {
   } catch {
     // empty body is ok
   }
-  const weights = body.weights ?? { distance: 1 };
+  const weights = body.weights ?? { distance: 1, cost: 0, carbon: 0, diversion: 0 };
 
-  const [strategyResult, projectRes, facilitiesRes, distancesRes, partnersRes] = await Promise.all([
+  // Single source of truth: ensure distances exist (fetch or compute + persist), then use for scoring
+  const distancesResult = await getProjectFacilityDistances(supabase, projectId);
+  const { distanceMap, facilitiesWithCoords, distancesLoaded, missingFacilityIds } = distancesResult;
+
+  // Temporary debug logs – remove after verifying distances fix
+  const facilityCount = facilitiesWithCoords;
+  const distanceCount = distancesLoaded;
+  if (process.env.NODE_ENV !== "production") {
+    console.log("[facility-optimiser] facilities with coords:", facilityCount);
+    console.log("[facility-optimiser] distances in map:", distanceCount);
+    if (missingFacilityIds.length > 0) {
+      console.log("[facility-optimiser] missing facility ids in distance map:", missingFacilityIds);
+    }
+  }
+
+  const [strategyResult, projectRes, facilitiesRes, distancesMetaRes, partnersRes] = await Promise.all([
     buildWasteStrategy(projectId, supabase).catch(() => null),
     supabase.from("projects").select("site_lat, site_lng").eq("id", projectId).single(),
     supabase
@@ -289,17 +305,19 @@ export async function POST(req: Request, { params }: Params) {
       .select("id, name, partner_id, accepted_streams, lat, lng"),
     supabase
       .from("project_facility_distances")
-      .select("facility_id, distance_m, duration_s, updated_at")
+      .select("updated_at")
       .eq("project_id", projectId),
     supabase.from("partners").select("id, name"),
   ]);
 
   const facilities = (facilitiesRes.data ?? []) as FacilityRow[];
-  const distances = (distancesRes.data ?? []) as DistanceRow[];
   const partners = (partnersRes.data ?? []) as PartnerRow[];
   const partnerById = new Map(partners.map((p) => [p.id, p.name]));
-
-  const distanceMap = buildDistanceMapFromRows(distances);
+  const distancesMeta = (distancesMetaRes.data ?? []) as { updated_at: string }[];
+  const lastUpdatedAt =
+    distancesMeta.length > 0
+      ? distancesMeta.reduce((max, r) => (r.updated_at > max ? r.updated_at : max), distancesMeta[0].updated_at)
+      : null;
 
   const streamPlans = strategyResult?.streamPlans ?? [];
   const streamsWithTonnes = streamPlans.filter((s) => s.total_tonnes > 0);
@@ -346,11 +364,7 @@ export async function POST(req: Request, { params }: Params) {
   const facilitiesGeocoded = facilities.filter(
     (f) => f.lat != null && f.lng != null && Number.isFinite(Number(f.lat)) && Number.isFinite(Number(f.lng))
   ).length;
-  const distancesCached = distances.length;
-  const lastUpdatedAt =
-    distances.length > 0
-      ? distances.reduce((max, r) => (r.updated_at > max ? r.updated_at : max), distances[0].updated_at)
-      : null;
+  const distancesCached = distancesLoaded;
 
   const proj = projectRes.data as { site_lat: number | null; site_lng: number | null } | null;
   const pLat = proj?.site_lat != null ? Number(proj.site_lat) : null;
@@ -370,5 +384,8 @@ export async function POST(req: Request, { params }: Params) {
     distances_cached: distancesCached,
     last_updated_at: lastUpdatedAt,
     results,
+    // For client debug note when NEXT_PUBLIC_DEBUG_DISTANCES === 'true'
+    debug_distances_loaded: distancesLoaded,
+    debug_distances_total: facilitiesWithCoords,
   });
 }

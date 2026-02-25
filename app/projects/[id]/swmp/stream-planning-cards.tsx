@@ -4,10 +4,10 @@ import * as React from "react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import type { StreamPlanItem, StrategyRecommendation, WasteStrategyResult } from "@/lib/planning/wasteStrategyBuilder";
-import { DecisionChip } from "@/components/ui/decision-chip";
 import { PriorityChip, type PriorityLevel } from "@/components/ui/priority-chip";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -22,7 +22,13 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { MoreHorizontal } from "lucide-react";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+  TooltipProvider,
+} from "@/components/ui/tooltip";
+import { MoreHorizontal, Pencil, Sparkles } from "lucide-react";
 import { INTENDED_OUTCOME_OPTIONS } from "@/lib/swmp/model";
 import { isRecommendationResolved } from "@/app/projects/[id]/swmp/recommendation-helpers";
 
@@ -129,23 +135,23 @@ export function StreamPlanningFilters({
   missingCount: number;
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-3">
+    <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-2">
       <Input
         placeholder="Search stream name"
         value={state.search}
         onChange={(e) => onChange({ ...state, search: e.target.value })}
-        className="max-w-[200px] h-9"
+        className="h-9 w-full min-w-0 sm:max-w-[200px]"
       />
       <Select
         value={state.filter}
         onValueChange={(v) => onChange({ ...state, filter: v as StreamFilterState["filter"] })}
       >
-        <SelectTrigger className="w-[160px] h-9">
-          <SelectValue />
+        <SelectTrigger className="h-9 w-full sm:w-[160px]">
+          <SelectValue placeholder="Stream" />
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="all">All streams</SelectItem>
-          <SelectItem value="missing">Missing decisions ({missingCount})</SelectItem>
+          <SelectItem value="missing">Missing ({missingCount})</SelectItem>
           <SelectItem value="complete">Complete</SelectItem>
         </SelectContent>
       </Select>
@@ -153,8 +159,8 @@ export function StreamPlanningFilters({
         value={state.handling}
         onValueChange={(v) => onChange({ ...state, handling: v as StreamFilterState["handling"] })}
       >
-        <SelectTrigger className="w-[130px] h-9">
-          <SelectValue />
+        <SelectTrigger className="h-9 w-full sm:w-[130px]">
+          <SelectValue placeholder="Handling" />
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="all">Handling: All</SelectItem>
@@ -166,13 +172,13 @@ export function StreamPlanningFilters({
         value={state.sort}
         onValueChange={(v) => onChange({ ...state, sort: v as StreamFilterState["sort"] })}
       >
-        <SelectTrigger className="w-[160px] h-9">
-          <SelectValue />
+        <SelectTrigger className="h-9 w-full sm:w-[160px]">
+          <SelectValue placeholder="Sort" />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="tonnes">Sort: Tonnes (desc)</SelectItem>
-          <SelectItem value="missing_first">Sort: Missing first</SelectItem>
-          <SelectItem value="distance">Sort: Distance (asc)</SelectItem>
+          <SelectItem value="tonnes">Tonnes (desc)</SelectItem>
+          <SelectItem value="missing_first">Missing first</SelectItem>
+          <SelectItem value="distance">Distance (asc)</SelectItem>
         </SelectContent>
       </Select>
     </div>
@@ -300,6 +306,26 @@ export interface StreamPlanningCardProps {
   onComputeDistances?: () => void;
 }
 
+function StreamNameWithTooltip({ name }: { name: string }) {
+  const truncated = name.length > 28;
+  const content = (
+    <span className="block truncate font-semibold text-foreground" title={truncated ? name : undefined}>
+      {name}
+    </span>
+  );
+  if (truncated) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>{content}</TooltipTrigger>
+        <TooltipContent side="top" className="max-w-[280px]">
+          {name}
+        </TooltipContent>
+      </Tooltip>
+    );
+  }
+  return content;
+}
+
 export function StreamPlanningCard({
   plan,
   allStreamPlans,
@@ -326,9 +352,10 @@ export function StreamPlanningCard({
   const [handlingUpdating, setHandlingUpdating] = React.useState(false);
   const [outcomeUpdating, setOutcomeUpdating] = React.useState(false);
 
-  const handlingChipState = plan.handling_mode === "separated" ? "separated" : plan.handling_mode === "mixed" ? "mixed" : "missing";
-  const cardComplete = hasDestination;
-  const maxTonnes = Math.max(plan.total_tonnes, 1);
+  const displayOutcome = plan.intended_outcome_display ?? "Recycle";
+  const distanceKm = (plan.distance_km != null && Number.isFinite(plan.distance_km)) ? plan.distance_km : (optimiserStream?.assigned_distance_km ?? null);
+  const durationMin = plan.duration_min ?? optimiserStream?.assigned_duration_min ?? null;
+  const customAddress = plan.destination_mode === "custom" && (plan.custom_destination_address ?? "").trim();
 
   const handleHandlingChange = async (mode: "mixed" | "separated") => {
     if (mode === plan.handling_mode) return;
@@ -341,8 +368,6 @@ export function StreamPlanningCard({
     }
   };
 
-  const displayOutcome = plan.intended_outcome_display ?? "Recycle";
-
   const handleOutcomeChange = async (value: string) => {
     setOutcomeUpdating(true);
     try {
@@ -354,161 +379,174 @@ export function StreamPlanningCard({
   };
 
   return (
-    <div
+    <Card
       className={cn(
-        "rounded-2xl border shadow-sm bg-white dark:bg-card p-5 min-w-0 transition-shadow hover:shadow-md",
-        cardComplete ? "border-emerald-200 dark:border-emerald-800/50 bg-emerald-50/30 dark:bg-emerald-950/10" : "border-red-200 dark:border-red-800/50 bg-red-50/30 dark:bg-red-950/10"
+        "flex flex-col border-border/40 bg-card p-4 shadow-sm transition-[box-shadow,transform] hover:shadow-md hover:-translate-y-0.5 min-w-0 gap-0"
       )}
     >
-      {/* Header */}
-      <div className="flex items-start justify-between gap-2 mb-4">
-        <h3 className="font-semibold text-foreground truncate">{plan.stream_name}</h3>
-        <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
-          {hasDestination ? (
-            <Badge variant="secondary" className="text-xs font-normal bg-emerald-500/15 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400">
-              Configured
-            </Badge>
-          ) : (
-            <Badge variant="secondary" className="text-xs font-normal bg-amber-500/15 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-400">
-              No destination
-            </Badge>
-          )}
-          <DecisionChip state={handlingChipState} />
-          <Badge variant="secondary" className="text-xs font-normal tabular-nums">
-            {plan.total_tonnes.toFixed(1)} t
+      <CardContent className="p-0 flex flex-col flex-1 gap-4">
+        {/* Header row: stream name | status + overflow */}
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0 flex-1">
+            <StreamNameWithTooltip name={plan.stream_name} />
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0">
+            {hasDestination ? (
+              <Badge variant="secondary" className="text-xs font-medium bg-emerald-500/15 text-emerald-700 border-0 dark:bg-emerald-950/50 dark:text-emerald-400">
+                Configured
+              </Badge>
+            ) : (
+              <Badge variant="secondary" className="text-xs font-medium bg-amber-500/15 text-amber-700 border-0 dark:bg-amber-950/50 dark:text-amber-400">
+                Needs attention
+              </Badge>
+            )}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" aria-label="Stream actions">
+                  <MoreHorizontal className="size-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem
+                  onClick={async () => {
+                    if (hasDestination && onResetFacility) {
+                      await onResetFacility(plan.stream_name);
+                      onRefetch();
+                    }
+                  }}
+                  disabled={!hasDestination}
+                >
+                  Reset facility
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link href={`/projects/${projectId}/forecast?stream=${encodeURIComponent(plan.stream_name)}`}>
+                    View forecast items
+                  </Link>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </div>
+
+        {/* Meta row: tonnes, handling, disposal, destination state */}
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm font-semibold tabular-nums text-foreground">{plan.total_tonnes.toFixed(1)} t</span>
+          <Badge variant="outline" className="text-xs font-normal">
+            {plan.handling_mode === "separated" ? "Separated" : plan.handling_mode === "mixed" ? "Mixed" : "—"}
           </Badge>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="Stream actions">
-                <MoreHorizontal className="size-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem
-                onClick={async () => {
-                  if (hasDestination && onResetFacility) {
-                    await onResetFacility(plan.stream_name);
-                    onRefetch();
-                  }
-                }}
-                disabled={!hasDestination}
-              >
-                Reset facility
-              </DropdownMenuItem>
-              <DropdownMenuItem asChild>
-                <Link href={`/projects/${projectId}/forecast?stream=${encodeURIComponent(plan.stream_name)}`}>
-                  View forecast items
-                </Link>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      </div>
-
-      {/* Body: two columns */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-        <div>
-          <p className="text-xs font-medium text-muted-foreground mb-1">Quantities</p>
-          <div className="space-y-1 text-sm">
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Manual (t)</span>
-              <span className="tabular-nums">{plan.manual_tonnes.toFixed(1)}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Forecast (t)</span>
-              <span className="tabular-nums">{plan.forecast_tonnes.toFixed(1)}</span>
-            </div>
-            <div className="flex justify-between font-semibold">
-              <span>Total (t)</span>
-              <span className="tabular-nums">{plan.total_tonnes.toFixed(1)}</span>
-            </div>
-          </div>
-          <div className="mt-2 h-2 rounded-full bg-muted overflow-hidden">
-            <div
-              className="h-full rounded-full bg-indigo-500 dark:bg-indigo-600"
-              style={{ width: `${Math.min(100, (plan.total_tonnes / maxTonnes) * 100)}%` }}
-            />
-          </div>
-        </div>
-        <div>
-          <p className="text-xs font-medium text-muted-foreground mb-1">Destination</p>
+          <Badge variant="outline" className="text-xs font-normal">
+            {displayOutcome}
+          </Badge>
           {hasDestination ? (
-            <div className="text-sm space-y-0.5">
-              <p className="font-medium truncate" title={destinationDisplayName}>
-                Destination: {destinationDisplayName}
-              </p>
-              <p
-                className={cn(
-                  "text-xs tabular-nums",
-                  (plan.distance_km != null || optimiserStream?.assigned_distance_km != null) ? "text-muted-foreground" : "text-muted-foreground/80"
-                )}
-                title={
-                  (plan.distance_km != null || optimiserStream?.assigned_distance_km != null)
-                    ? undefined
-                    : "Select a facility or custom destination to calculate distance."
-                }
-              >
-                Distance:{" "}
-                {(plan.distance_km != null && Number.isFinite(plan.distance_km)) || (optimiserStream?.assigned_distance_km != null) ? (
-                  <>
-                    {(plan.distance_km ?? optimiserStream!.assigned_distance_km)!.toFixed(1)} km
-                    {(plan.duration_min != null || optimiserStream?.assigned_duration_min != null) &&
-                      ` · ${Math.round(plan.duration_min ?? optimiserStream?.assigned_duration_min ?? 0)} min`}
-                  </>
-                ) : (
-                  "—"
-                )}
-              </p>
-            </div>
+            <Badge variant="outline" className="text-xs font-normal text-muted-foreground border-muted-foreground/30">
+              Set
+            </Badge>
           ) : (
-            <div className="space-y-2">
-              <p className="text-sm text-muted-foreground" title="Select a facility or custom destination to calculate distance.">
-                Destination: Not set
-              </p>
-              <p className="text-xs text-muted-foreground tabular-nums">Distance: —</p>
-              {!hasPartner ? (
-                <p className="text-xs text-muted-foreground">Select a Partner to see facility recommendations.</p>
-              ) : !recommendedFacility ? (
-                <p className="text-xs text-muted-foreground">No matching facilities for this stream.</p>
-              ) : (
-                <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/20 px-3 py-2">
-                  <div className="min-w-0">
-                    <p className="text-xs font-medium text-muted-foreground">Recommended: {recommendedFacility.facility_name}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {recommendedFacility.distance_not_computed
-                        ? "distance not computed"
-                        : `${recommendedFacility.distance_km} km`}
-                    </p>
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => onApplyFacility(plan.stream_name, recommendedFacility.facility_id)}
-                    disabled={applyFacilityStream !== null}
-                  >
-                    Apply
-                  </Button>
-                </div>
-              )}
-            </div>
+            <Badge variant="outline" className="text-xs font-normal text-muted-foreground border-destructive/30">
+              Not set
+            </Badge>
           )}
         </div>
-      </div>
 
-      {/* Footer: handling, outcome, primary action */}
-      <div className="flex flex-wrap items-center gap-3 pt-3 border-t border-border">
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground">Handling</span>
+        {/* Destination block */}
+        <div className="space-y-1">
+          {hasDestination ? (
+            <>
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <p className="text-sm font-medium truncate">{destinationDisplayName}</p>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" className="max-w-[280px]">
+                      {destinationDisplayName}
+                    </TooltipContent>
+                  </Tooltip>
+                  {customAddress ? (
+                    <p className="text-xs text-muted-foreground truncate mt-0.5">{customAddress}</p>
+                  ) : null}
+                </div>
+                <span className="text-xs tabular-nums text-muted-foreground shrink-0">
+                  {distanceKm != null ? (
+                    <>
+                      {distanceKm.toFixed(1)} km{durationMin != null ? ` · ${Math.round(durationMin)} min` : ""}
+                    </>
+                  ) : (
+                    "Distance pending"
+                  )}
+                </span>
+              </div>
+            </>
+          ) : (
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm text-muted-foreground">No destination</p>
+              <Button
+                variant="link"
+                size="sm"
+                className="h-auto p-0 text-xs font-medium"
+                asChild
+              >
+                <Link href={`/projects/${projectId}/optimiser`}>Set destination</Link>
+              </Button>
+            </div>
+          )}
+          {!hasDestination && hasPartner && recommendedFacility && (
+            <div className="flex flex-wrap items-center gap-2 rounded-md border border-border/60 bg-muted/20 px-3 py-2 mt-1">
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-medium text-muted-foreground">Recommended: {recommendedFacility.facility_name}</p>
+                <p className="text-xs text-muted-foreground">
+                  {recommendedFacility.distance_not_computed ? "Distance pending" : `${recommendedFacility.distance_km} km`}
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 shrink-0"
+                onClick={() => onApplyFacility(plan.stream_name, recommendedFacility.facility_id)}
+                disabled={applyFacilityStream !== null}
+              >
+                Apply
+              </Button>
+            </div>
+          )}
+          {!hasDestination && !hasPartner && (
+            <p className="text-xs text-muted-foreground">Select a partner to see recommendations.</p>
+          )}
+          {!hasDestination && hasPartner && !recommendedFacility && (
+            <p className="text-xs text-muted-foreground">No matching facilities for this stream.</p>
+          )}
+        </div>
+
+        {/* Quantities: muted inset panel */}
+        <div className="rounded-lg border border-border/50 bg-muted/30 p-3">
+          <div className="grid grid-cols-3 gap-2 text-center">
+            <div>
+              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Manual</p>
+              <p className="text-sm font-medium tabular-nums">{plan.manual_tonnes.toFixed(1)}</p>
+            </div>
+            <div>
+              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Forecast</p>
+              <p className="text-sm font-medium tabular-nums">{plan.forecast_tonnes.toFixed(1)}</p>
+            </div>
+            <div>
+              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Total</p>
+              <p className="text-sm font-semibold tabular-nums">{plan.total_tonnes.toFixed(1)}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Controls: handling toggle + disposal select (compact) */}
+        <div className="flex flex-wrap items-center gap-2">
           <div className="flex rounded-md border border-border overflow-hidden">
             <button
               type="button"
               onClick={() => handleHandlingChange("mixed")}
               disabled={handlingUpdating}
               className={cn(
-                "px-2.5 py-1 text-xs font-medium",
+                "px-2.5 py-1.5 text-xs font-medium transition-colors",
                 plan.handling_mode === "mixed"
-                  ? "bg-slate-200 dark:bg-slate-700 text-foreground"
-                  : "bg-transparent text-muted-foreground hover:bg-muted"
+                  ? "bg-muted text-foreground"
+                  : "bg-transparent text-muted-foreground hover:bg-muted/50"
               )}
             >
               Mixed
@@ -518,87 +556,94 @@ export function StreamPlanningCard({
               onClick={() => handleHandlingChange("separated")}
               disabled={handlingUpdating}
               className={cn(
-                "px-2.5 py-1 text-xs font-medium",
+                "px-2.5 py-1.5 text-xs font-medium transition-colors",
                 plan.handling_mode === "separated"
-                  ? "bg-emerald-200 dark:bg-emerald-800 text-emerald-800 dark:text-emerald-200"
-                  : "bg-transparent text-muted-foreground hover:bg-muted"
+                  ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 dark:bg-emerald-950/30"
+                  : "bg-transparent text-muted-foreground hover:bg-muted/50"
               )}
             >
               Separated
             </button>
           </div>
+          <Select value={displayOutcome} onValueChange={handleOutcomeChange} disabled={outcomeUpdating}>
+            <SelectTrigger className="h-8 w-[130px] text-xs border-border/60">
+              <SelectValue placeholder="Disposal" />
+            </SelectTrigger>
+            <SelectContent>
+              {INTENDED_OUTCOME_OPTIONS.map((opt) => (
+                <SelectItem key={opt} value={opt}>
+                  {opt}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
-        <Select
-          value={displayOutcome}
-          onValueChange={(v) => handleOutcomeChange(v)}
-          disabled={outcomeUpdating}
-        >
-          <SelectTrigger className="w-[140px] h-8 text-xs" title="Disposal method (choose one)">
-            <SelectValue placeholder="Disposal method" />
-          </SelectTrigger>
-          <SelectContent>
-            {INTENDED_OUTCOME_OPTIONS.map((opt) => (
-              <SelectItem key={opt} value={opt}>
-                {opt}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <div className="ml-auto flex flex-wrap items-center gap-2">
+
+        {/* Bottom action row: Optimise + Edit; Apply nearest when no destination */}
+        <div className="flex flex-wrap items-center gap-2 pt-2 mt-auto border-t border-border/50">
           {!hasDestination && top3.length > 0 && (
             <Button
               size="sm"
+              variant="default"
+              className="h-8"
               disabled={applyFacilityStream !== null}
               onClick={() => top3[0] && onApplyFacility(plan.stream_name, top3[0].facility_id)}
             >
               {applyFacilityStream === plan.stream_name ? "Applying…" : "Apply nearest"}
             </Button>
           )}
-          <Button variant="outline" size="sm" asChild>
+          <Button variant="secondary" size="sm" className="h-8 gap-1.5" asChild>
             <Link href={`/projects/${projectId}/optimiser`}>
+              <Sparkles className="size-3.5" />
               Optimise facilities
             </Link>
           </Button>
+          <Button variant="ghost" size="sm" className="h-8 gap-1.5" asChild>
+            <Link href={`/projects/${projectId}/forecast?stream=${encodeURIComponent(plan.stream_name)}`}>
+              <Pencil className="size-3.5" />
+              Edit
+            </Link>
+          </Button>
         </div>
-      </div>
 
-      {/* Collapsible: Recommendations */}
-      {streamRecommendations.length > 0 && (
-        <details
-          className="mt-3 border-t border-border pt-3"
-          open={recsOpen}
-          onToggle={(e) => setRecsOpen((e.target as HTMLDetailsElement).open)}
-        >
-          <summary className="cursor-pointer text-sm font-medium text-muted-foreground hover:text-foreground list-none [&::-webkit-details-marker]:hidden">
-            Recommendations ({streamRecommendations.length})
-          </summary>
-          <ul className="mt-2 space-y-2">
-            {streamRecommendations.map((rec) => {
-              const resolved = isRecommendationResolved(rec, allStreamPlans);
-              return (
-                <li key={rec.id} className="rounded-lg border bg-muted/20 p-2 text-sm">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <PriorityChip level={rec.priority as PriorityLevel} />
-                    <span className="font-medium">{rec.title}</span>
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-1 line-clamp-1">{rec.description}</p>
-                  {rec.apply_action && !resolved && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="mt-2 h-7 text-xs"
-                      onClick={() => onApplyRecommendation(rec.id)}
-                    >
-                      Apply
-                    </Button>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-        </details>
-      )}
-    </div>
+        {/* Collapsible: Recommendations */}
+        {streamRecommendations.length > 0 && (
+          <details
+            className="border-t border-border/50 pt-3 mt-0"
+            open={recsOpen}
+            onToggle={(e) => setRecsOpen((e.target as HTMLDetailsElement).open)}
+          >
+            <summary className="cursor-pointer text-sm font-medium text-muted-foreground hover:text-foreground list-none [&::-webkit-details-marker]:hidden">
+              Recommendations ({streamRecommendations.length})
+            </summary>
+            <ul className="mt-2 space-y-2">
+              {streamRecommendations.map((rec) => {
+                const resolved = isRecommendationResolved(rec, allStreamPlans);
+                return (
+                  <li key={rec.id} className="rounded-md border border-border/50 bg-muted/20 p-2.5 text-sm">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <PriorityChip level={rec.priority as PriorityLevel} />
+                      <span className="font-medium">{rec.title}</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-1 line-clamp-1">{rec.description}</p>
+                    {rec.apply_action && !resolved && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="mt-2 h-7 text-xs"
+                        onClick={() => onApplyRecommendation(rec.id)}
+                      >
+                        Apply
+                      </Button>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </details>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -657,9 +702,10 @@ export function StreamPlanningCards({
         onChange={onFilterChange}
         missingCount={summary.streamsMissingFacility}
       />
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-        {filteredPlans.map((plan) => (
-          <StreamPlanningCard
+      <TooltipProvider delayDuration={200}>
+        <div className="grid grid-cols-1 sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {filteredPlans.map((plan) => (
+            <StreamPlanningCard
             key={plan.stream_id}
             plan={plan}
             allStreamPlans={wasteStrategy.streamPlans}
@@ -677,8 +723,9 @@ export function StreamPlanningCards({
             onPlanPatch={onPlanPatch}
             onComputeDistances={onComputeDistances}
           />
-        ))}
-      </div>
+          ))}
+        </div>
+      </TooltipProvider>
     </div>
   );
 }

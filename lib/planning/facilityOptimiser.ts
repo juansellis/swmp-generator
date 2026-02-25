@@ -1,13 +1,17 @@
 /**
  * Facility Optimiser Engine (pure, testable).
- * Recommends best facility per waste stream using distance (and optional cost/carbon).
- * Handles missing data gracefully: omits cost/carbon terms when not provided.
+ * Uses lib/optimiser/scoreFacility for normalised weighted scoring.
+ * Recommends best facility per waste stream using distance, cost, carbon, diversion.
+ * Handles missing data gracefully: falls back to distance-only when others missing.
  */
+
+import { scoreCandidates, type ScoreWeights } from "@/lib/optimiser/scoreFacility";
 
 export type OptimiserWeights = {
   distance?: number;
   cost?: number;
   carbon?: number;
+  diversion?: number;
 };
 
 export type FacilityCandidate = {
@@ -21,6 +25,8 @@ export type FacilityCandidate = {
   cost_per_tonne?: number | null;
   /** Optional; if missing, carbon term is omitted from score */
   carbon_kg_co2e_per_tonne?: number | null;
+  /** Optional; higher is better; 0–100 typical */
+  diversion_rating?: number | null;
 };
 
 export type StreamInput = {
@@ -42,6 +48,8 @@ export type OptimiserResultItem = {
   planned_tonnes: number;
   recommended_facility_id: string;
   recommended_facility_name: string;
+  /** 0–1 composite score (higher = better); omitted when no eligible facilities */
+  score?: number;
   distance_km: number | null;
   duration_min: number | null;
   estimated_cost: number | null;
@@ -61,46 +69,16 @@ const DEFAULT_WEIGHTS: Required<OptimiserWeights> = {
   distance: 1,
   cost: 0,
   carbon: 0,
+  diversion: 0,
 };
 
-/**
- * Score a candidate: lower is better.
- * Uses only available signals; missing cost/carbon omit those terms.
- */
-function scoreCandidate(
-  c: FacilityCandidate,
-  weights: Required<OptimiserWeights>,
-  tonnes: number
-): { score: number; hasDistance: boolean; hasCost: boolean; hasCarbon: boolean } {
-  let score = 0;
-  let hasDistance = false;
-  let hasCost = false;
-  let hasCarbon = false;
-
-  if (c.distance_km != null && Number.isFinite(c.distance_km) && weights.distance > 0) {
-    score += c.distance_km * weights.distance;
-    hasDistance = true;
-  }
-  if (
-    c.cost_per_tonne != null &&
-    Number.isFinite(c.cost_per_tonne) &&
-    weights.cost > 0 &&
-    tonnes > 0
-  ) {
-    score += (c.cost_per_tonne * tonnes) * weights.cost;
-    hasCost = true;
-  }
-  if (
-    c.carbon_kg_co2e_per_tonne != null &&
-    Number.isFinite(c.carbon_kg_co2e_per_tonne) &&
-    weights.carbon > 0 &&
-    tonnes > 0
-  ) {
-    score += (c.carbon_kg_co2e_per_tonne * tonnes) * weights.carbon;
-    hasCarbon = true;
-  }
-
-  return { score, hasDistance, hasCost, hasCarbon };
+function toScoreInput(c: FacilityCandidate): { distance_km: number | null; cost_per_tonne: number | null; carbon_factor: number | null; diversion_rating: number | null } {
+  return {
+    distance_km: c.distance_km != null && Number.isFinite(c.distance_km) ? c.distance_km : null,
+    cost_per_tonne: c.cost_per_tonne != null && Number.isFinite(c.cost_per_tonne) ? c.cost_per_tonne : null,
+    carbon_factor: c.carbon_kg_co2e_per_tonne != null && Number.isFinite(c.carbon_kg_co2e_per_tonne) ? c.carbon_kg_co2e_per_tonne : null,
+    diversion_rating: c.diversion_rating != null && Number.isFinite(c.diversion_rating) ? c.diversion_rating : null,
+  };
 }
 
 /**
@@ -200,6 +178,14 @@ export function runFacilityOptimiser(input: RunOptimiserInput): OptimiserResultI
     distance: input.weights?.distance ?? DEFAULT_WEIGHTS.distance,
     cost: input.weights?.cost ?? DEFAULT_WEIGHTS.cost,
     carbon: input.weights?.carbon ?? DEFAULT_WEIGHTS.carbon,
+    diversion: input.weights?.diversion ?? DEFAULT_WEIGHTS.diversion,
+  };
+
+  const scoreWeights: ScoreWeights = {
+    distanceWeight: weights.distance,
+    costWeight: weights.cost,
+    carbonWeight: weights.carbon,
+    diversionWeight: weights.diversion,
   };
 
   const results: OptimiserResultItem[] = [];
@@ -208,26 +194,32 @@ export function runFacilityOptimiser(input: RunOptimiserInput): OptimiserResultI
     const candidates = input.eligiblePerStream.get(stream.stream_name) ?? [];
     const tonnes = Math.max(0, Number(stream.planned_tonnes) || 0);
 
-    const scored = candidates
-      .map((c) => {
-        const { score, hasDistance, hasCost, hasCarbon } = scoreCandidate(c, weights, tonnes);
-        return { candidate: c, score, hasDistance, hasCost, hasCarbon };
-      })
-      .sort((a, b) => {
-        if (a.score !== b.score) return a.score - b.score;
-        const da = a.candidate.distance_km ?? Infinity;
-        const db = b.candidate.distance_km ?? Infinity;
-        if (da !== db) return da - db;
-        return (a.candidate.facility_name ?? "").localeCompare(b.candidate.facility_name ?? "");
-      });
+    type WithCandidate = {
+      distance_km: number | null;
+      cost_per_tonne: number | null;
+      carbon_factor: number | null;
+      diversion_rating: number | null;
+      _c: FacilityCandidate;
+    };
+    const withCandidate = candidates.map((c) => ({ ...toScoreInput(c), _c: c } as WithCandidate));
+    const scored = scoreCandidates(withCandidate, scoreWeights);
+    const scoredByCandidate = scored.map((s) => ({
+      candidate: (s.candidate as WithCandidate)._c,
+      score: s.score,
+      hasDistance: s.usedDistance,
+      hasCost: s.usedCost,
+      hasCarbon: s.usedCarbon,
+      hasDiversion: s.usedDiversion,
+    }));
 
-    const best = scored[0];
+    const best = scoredByCandidate[0];
     if (!best) {
       results.push({
         stream_name: stream.stream_name,
         planned_tonnes: tonnes,
         recommended_facility_id: "",
         recommended_facility_name: "",
+        score: 0,
         distance_km: null,
         duration_min: null,
         estimated_cost: null,
@@ -269,7 +261,7 @@ export function runFacilityOptimiser(input: RunOptimiserInput): OptimiserResultI
         ? (c.carbon_kg_co2e_per_tonne * tonnes) / 1000
         : null;
 
-    const alternatives = scored.slice(1, 4).map(({ candidate: alt }) => ({
+    const alternatives = scoredByCandidate.slice(1, 4).map(({ candidate: alt }) => ({
       facility_id: alt.facility_id,
       facility_name: alt.facility_name,
       distance_km: alt.distance_km,
@@ -281,6 +273,7 @@ export function runFacilityOptimiser(input: RunOptimiserInput): OptimiserResultI
       planned_tonnes: tonnes,
       recommended_facility_id: c.facility_id,
       recommended_facility_name: c.facility_name,
+      score: best.score,
       distance_km: c.distance_km,
       duration_min: c.duration_min,
       estimated_cost,

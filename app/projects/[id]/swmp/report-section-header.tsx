@@ -11,8 +11,8 @@ const SECTIONS: { key: ReportSection; label: string }[] = [
   { key: "overview", label: "Overview" },
   { key: "strategy", label: "Strategy" },
   { key: "streams", label: "Waste Streams" },
-  { key: "narrative", label: "Narrative" },
   { key: "carbon", label: "Carbon Forecast" },
+  { key: "narrative", label: "Narrative" },
   { key: "appendix", label: "Appendix" },
 ];
 
