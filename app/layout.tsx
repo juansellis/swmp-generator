@@ -18,11 +18,11 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: "WasteX SWMP-Generator",
-    template: "%s | WasteX SWMP-Generator",
+    default: "Blueprint",
+    template: "%s | Blueprint",
   },
   description:
-    "WasteX SWMP-Generator – a digital Site Waste Management Plan platform for construction projects in New Zealand.",
+    "Blueprint — SWMP creation, forecasting, and reporting.",
 };
 
 export default function RootLayout({

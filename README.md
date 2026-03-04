@@ -1,4 +1,4 @@
-# SWMP Generator
+# Blueprint
 
 Next.js + Supabase app to generate NZ-first Site Waste Management Plans (SWMPs).
 

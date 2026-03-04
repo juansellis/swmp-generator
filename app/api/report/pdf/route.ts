@@ -92,7 +92,7 @@ export async function GET(req: Request) {
 
     const projectName = (project as { name?: string | null }).name?.trim() || "Project";
     const headerHtml = `<div style="font-size:10px; color:#374151; width:100%; padding:0 16mm; box-sizing:border-box;"><span>${escapeHtml(projectName)}</span> <span>SWMP</span></div>`;
-    const footerHtml = `<div style="font-size:9px; color:#6b7280; width:100%; padding:0 16mm; box-sizing:border-box; display:flex; justify-content:space-between; align-items:center;"><span>Prepared by WasteX</span><span>Page <span class="pageNumber"></span> of <span class="totalPages"></span></span></div>`;
+    const footerHtml = `<div style="font-size:9px; color:#6b7280; width:100%; padding:0 16mm; box-sizing:border-box; display:flex; justify-content:space-between; align-items:center;"><span>Prepared by Blueprint</span><span>Page <span class="pageNumber"></span> of <span class="totalPages"></span></span></div>`;
 
     const pdfBuffer = await page.pdf({
       format: "A4",

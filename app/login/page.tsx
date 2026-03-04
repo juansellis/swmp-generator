@@ -107,7 +107,7 @@ export default function LoginPage() {
           </div>
 
           <PageHeader
-            title="SWMP Generator"
+            title="Blueprint"
             subtitle="Sign in to generate NZ-first Site Waste Management Plans."
           />
 

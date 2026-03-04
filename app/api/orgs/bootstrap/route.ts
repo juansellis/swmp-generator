@@ -45,7 +45,7 @@ export async function POST(req: Request) {
         name: "My Organisation",
         brand_primary: "#111111",
         brand_secondary: "#666666",
-        footer_text: "Prepared by WasteX SWMP Generator",
+        footer_text: "Prepared by Blueprint",
       })
       .select("id")
       .single();

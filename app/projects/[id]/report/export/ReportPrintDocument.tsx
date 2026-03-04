@@ -81,7 +81,7 @@ export function ReportPrintDocument({ data, projectName }: Props) {
                 unoptimized
               />
             ) : (
-              <span className="text-lg font-semibold text-gray-600">WasteX</span>
+              <span className="text-lg font-semibold text-gray-600">Blueprint</span>
             )}
             {branding.client_logo_url && (
               <Image

@@ -18,7 +18,7 @@ export function Logo({ className, height, width, href }: LogoProps) {
   const logoContent = (
     <Image
       src="/wastex-logo.svg"
-      alt="WasteX"
+      alt="Blueprint"
       height={logoHeight}
       width={logoWidth}
       className={cn("h-auto w-auto", className)}

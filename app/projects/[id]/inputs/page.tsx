@@ -3724,7 +3724,7 @@ export default function ProjectInputsPage() {
                       <Input
                         value={softwareName}
                         onChange={(e) => setSoftwareName(e.target.value)}
-                        placeholder="Software name (e.g. WasteX / Excel)"
+                        placeholder="Software name (e.g. Blueprint / Excel)"
                         disabled={saveLoading}
                         className="max-w-xs bg-muted/30 rounded-lg border-border/50"
                       />
