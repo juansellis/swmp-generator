@@ -72,11 +72,12 @@ function formatTonnes(n: number): string {
   return n.toFixed(3);
 }
 
+/* Mild colour accents for stats (subtle, not neon) */
 const KPI_VARIANTS = {
-  blue: "border-t-4 border-blue-500/40 bg-blue-50/40 dark:bg-blue-950/20 [&_.kpi-icon]:text-primary",
-  green: "border-t-4 border-green-500/40 bg-green-50/40 dark:bg-green-950/20 [&_.kpi-icon]:text-green-600 dark:[&_.kpi-icon]:text-green-400",
-  purple: "border-t-4 border-purple-500/40 bg-purple-50/40 dark:bg-purple-950/20 [&_.kpi-icon]:text-purple-600 dark:[&_.kpi-icon]:text-purple-400",
-  amber: "border-t-4 border-amber-500/40 bg-amber-50/40 dark:bg-amber-950/20 [&_.kpi-icon]:text-amber-600 dark:[&_.kpi-icon]:text-amber-400",
+  blue: "bg-primary/[0.07] dark:bg-primary/10 [&_.kpi-icon]:text-primary [&_.kpi-icon]:bg-primary/15",
+  green: "bg-emerald-50/50 dark:bg-emerald-950/15 [&_.kpi-icon]:text-emerald-600 dark:[&_.kpi-icon]:text-emerald-400 [&_.kpi-icon]:bg-emerald-500/20",
+  purple: "bg-violet-50/50 dark:bg-violet-950/15 [&_.kpi-icon]:text-violet-600 dark:[&_.kpi-icon]:text-violet-400 [&_.kpi-icon]:bg-violet-500/20",
+  amber: "bg-amber-50/40 dark:bg-amber-950/15 [&_.kpi-icon]:text-amber-600 dark:[&_.kpi-icon]:text-amber-400 [&_.kpi-icon]:bg-amber-500/20",
 } as const;
 
 /** Stat card for dashboard KPIs */
@@ -96,12 +97,12 @@ function StatCard({
   return (
     <div
       className={cn(
-        "rounded-xl border border-border/50 bg-card shadow-sm p-5 min-h-[100px] flex flex-col justify-center transition-colors hover:bg-muted/20",
+        "rounded-xl border border-border/20 bg-card shadow-[var(--shadow-card)] p-5 min-h-[100px] flex flex-col justify-center transition-shadow hover:shadow-[var(--shadow-card-hover)]",
         KPI_VARIANTS[variant]
       )}
     >
       <div className="flex items-start gap-3">
-        <div className="kpi-icon rounded-lg bg-muted/50 p-2 [&>svg]:size-5">
+        <div className="kpi-icon rounded-lg p-2 [&>svg]:size-5">
           {icon}
         </div>
         <div className="min-w-0 flex-1 space-y-1">
@@ -469,7 +470,7 @@ export default function ProjectsPage() {
         />
       }
     >
-      <div className="space-y-6">
+      <div className="space-y-8">
         {pageError ? (
           <Alert variant="destructive">
             <AlertTitle>Error</AlertTitle>
@@ -477,10 +478,15 @@ export default function ProjectsPage() {
           </Alert>
         ) : null}
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Left: minimal Create project card */}
-          <div className="lg:col-span-4">
-            <div className="rounded-xl border border-border/50 bg-gradient-to-r from-muted/30 to-muted/10 shadow-sm overflow-hidden p-6">
+        {/* Overview: stats + create */}
+        <section className="space-y-4" aria-labelledby="overview-heading">
+          <h2 id="overview-heading" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            Overview
+          </h2>
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            {/* Left: minimal Create project card */}
+            <div className="lg:col-span-4">
+              <div className="rounded-xl border border-border/20 bg-card shadow-[var(--shadow-card)] overflow-hidden p-6">
               <div className="flex flex-col items-start gap-4">
                 <div className="rounded-lg bg-primary/10 p-3 text-primary">
                   <Plus className="size-6" />
@@ -502,11 +508,11 @@ export default function ProjectsPage() {
                 </Button>
               </div>
             </div>
-          </div>
+            </div>
 
-          {/* Right: KPIs + Your Projects */}
-          <div className="lg:col-span-8 space-y-6">
-            {metricsError ? (
+            {/* Right: KPIs */}
+            <div className="lg:col-span-8 space-y-6">
+              {metricsError ? (
               <div className="flex items-center justify-between gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm">
                 <span className="text-destructive">{metricsError}</span>
                 <Button variant="outline" size="sm" onClick={() => fetchMetrics()} disabled={metricsLoading}>
@@ -514,41 +520,49 @@ export default function ProjectsPage() {
                 </Button>
               </div>
             ) : null}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <StatCard
-                icon={<FolderOpen className="size-5" />}
-                label="Active projects"
-                value={metrics?.activeProjects}
-                loading={metricsLoading}
-                variant="blue"
-              />
-              <StatCard
-                icon={<Recycle className="size-5" />}
-                label="Total waste streams"
-                value={metrics?.totalWasteStreamsConfigured}
-                loading={metricsLoading}
-                variant="green"
-              />
-              <StatCard
-                icon={<Building2 className="size-5" />}
-                label="Facilities utilised"
-                value={metrics?.facilitiesLinked}
-                loading={metricsLoading}
-                variant="purple"
-              />
-              <StatCard
-                icon={<TrendingUp className="size-5" />}
-                label="Estimated waste (t)"
-                value={metrics?.totalEstimatedWasteTonnes != null ? formatTonnes(metrics.totalEstimatedWasteTonnes) : undefined}
-                loading={metricsLoading}
-                variant="amber"
-              />
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <StatCard
+                  icon={<FolderOpen className="size-5" />}
+                  label="Active projects"
+                  value={metrics?.activeProjects}
+                  loading={metricsLoading}
+                  variant="blue"
+                />
+                <StatCard
+                  icon={<Recycle className="size-5" />}
+                  label="Total waste streams"
+                  value={metrics?.totalWasteStreamsConfigured}
+                  loading={metricsLoading}
+                  variant="green"
+                />
+                <StatCard
+                  icon={<Building2 className="size-5" />}
+                  label="Facilities utilised"
+                  value={metrics?.facilitiesLinked}
+                  loading={metricsLoading}
+                  variant="purple"
+                />
+                <StatCard
+                  icon={<TrendingUp className="size-5" />}
+                  label="Estimated waste (t)"
+                  value={metrics?.totalEstimatedWasteTonnes != null ? formatTonnes(metrics.totalEstimatedWasteTonnes) : undefined}
+                  loading={metricsLoading}
+                  variant="amber"
+                />
+              </div>
             </div>
+          </div>
+        </section>
 
-            <SectionCard
-              title="Your Projects"
-              description="Open a project to edit inputs and generate its SWMP."
-              actions={
+        {/* Your projects */}
+        <section className="space-y-4" aria-labelledby="projects-heading">
+          <h2 id="projects-heading" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            Your projects
+          </h2>
+          <SectionCard
+            title="Your Projects"
+            description="Open a project to edit inputs and generate its SWMP."
+            actions={
                 <Button
                   variant="outline"
                   size="sm"
@@ -587,7 +601,7 @@ export default function ProjectsPage() {
                     ))}
                   </div>
                 ) : filteredProjects.length === 0 ? (
-                  <div className="rounded-xl border border-border/50 bg-muted/30 py-12 px-6 text-center">
+                  <div className="rounded-xl border border-border/20 bg-muted/20 py-12 px-6 text-center shadow-[var(--shadow-card)]">
                     <p className="font-medium text-foreground">
                       {projects.length === 0 ? "No projects yet" : "No projects match your search"}
                     </p>
@@ -635,9 +649,8 @@ export default function ProjectsPage() {
                   </div>
                 )}
               </div>
-            </SectionCard>
-          </div>
-        </div>
+          </SectionCard>
+        </section>
 
         <NewProjectSheet
           open={newProjectSheetOpen}

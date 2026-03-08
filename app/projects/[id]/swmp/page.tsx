@@ -66,7 +66,7 @@ import { CheckCircle2, Circle, AlertCircle, FileDown, ListChecks, RefreshCw, Lay
 import { PlanSectionHeader } from "@/components/plan-section-header";
 
 const CARD_CLASS =
-  "overflow-hidden rounded-xl border border-border shadow-sm print:shadow-none print:border print:bg-white";
+  "overflow-hidden rounded-xl border border-border/20 shadow-[var(--shadow-card)] print:shadow-none print:border print:bg-white";
 const SECTION_SPACE = "space-y-8";
 
 /** Catches render errors in a section so one broken section does not blank the whole Report page. */
@@ -1113,7 +1113,7 @@ export default function SwmpPage() {
 
                     <TooltipProvider delayDuration={200}>
                     <Tabs defaultValue="machinery" className="w-full">
-                      <TabsList className="mb-4 print:border print:bg-muted/30">
+                      <TabsList className="mb-4 print:border print:bg-muted/30 print:shadow-none">
                         <TabsTrigger value="machinery" className="gap-2">
                           <Fuel className="size-4" />
                           Machinery

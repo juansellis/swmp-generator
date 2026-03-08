@@ -21,11 +21,11 @@ export function SectionCard({
   return (
     <div
       className={cn(
-        "rounded-xl border border-border/50 bg-card shadow-sm overflow-hidden",
+        "rounded-xl border border-border/20 bg-card shadow-[var(--shadow-card)] overflow-hidden",
         className
       )}
     >
-      <div className="border-b border-border/50 bg-card px-6 py-4">
+      <div className="border-b border-border/20 bg-card px-6 py-4">
         <div className="flex items-start justify-between gap-4">
           <div className="space-y-1 min-w-0">
             <h2 className="text-lg font-semibold text-foreground">{title}</h2>

@@ -51,7 +51,7 @@ export function ReportSectionHeader({
           <div className="flex items-center gap-2 flex-shrink-0">
             {!exportMode && (
               <nav
-                className="flex items-center gap-0.5 rounded-lg bg-muted p-0.5"
+                className="flex items-center gap-1 rounded-lg bg-muted/50 p-1"
                 aria-label="Report sections"
               >
                 {SECTIONS.map(({ key, label }) => {
@@ -64,10 +64,10 @@ export function ReportSectionHeader({
                       key={key}
                       href={href}
                       className={cn(
-                        "inline-flex items-center justify-center rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors whitespace-nowrap",
+                        "inline-flex items-center justify-center rounded-md px-3 py-2 text-sm font-medium transition-colors whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
                         isActive
-                          ? "bg-background text-foreground shadow-sm"
-                          : "text-muted-foreground hover:text-foreground"
+                          ? "bg-background text-primary shadow-[var(--shadow-card)] font-medium"
+                          : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
                       )}
                     >
                       {label}

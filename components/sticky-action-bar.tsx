@@ -49,7 +49,7 @@ export function StickyActionBar({
   return (
     <div
       className={cn(
-        "sticky bottom-0 z-10 flex items-center justify-between gap-4 border-t border-border bg-background/95 backdrop-blur px-4 py-3 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]",
+        "sticky bottom-0 z-10 flex items-center justify-between gap-4 border-t border-border/30 bg-background/95 backdrop-blur px-4 py-3 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]",
         className
       )}
     >

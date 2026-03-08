@@ -23,6 +23,10 @@ export const metadata: Metadata = {
   },
   description:
     "Blueprint — SWMP creation, forecasting, and reporting.",
+  icons: {
+    icon: "/favicon.png",
+    apple: "/apple-touch-icon.png",
+  },
 };
 
 export default function RootLayout({

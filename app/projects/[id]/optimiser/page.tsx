@@ -416,7 +416,7 @@ export default function ProjectOptimiserPage() {
     <AppShell>
       <div className="max-w-6xl mx-auto px-4 py-5 space-y-5 min-w-0 overflow-x-hidden">
         <ProjectHeader />
-        <Card className="border-border/50 shadow-sm overflow-hidden">
+        <Card className="border-border/40 shadow-[var(--shadow-card)] overflow-hidden">
           <PlanSectionHeader
             icon={<Zap className="size-5 text-amber-500" />}
             title="Facility Optimiser"
@@ -506,7 +506,7 @@ export default function ProjectOptimiserPage() {
         </Card>
 
         {!loading && !noStreams && !noFacilities ? (
-          <Card className="border-border/50 shadow-sm overflow-hidden">
+          <Card className="border-border/40 shadow-[var(--shadow-card)] overflow-hidden">
             <PlanSectionHeader
               icon={<MapPin className="size-5" />}
               title="Location status"
@@ -587,7 +587,7 @@ export default function ProjectOptimiserPage() {
         </AlertDialog>
 
         {loading ? (
-          <Card className="border-border/50">
+          <Card className="border-border/40">
             <CardContent className="p-6 space-y-4">
               <Skeleton className="h-6 w-48" />
               <Skeleton className="h-10 w-full" />
@@ -595,7 +595,7 @@ export default function ProjectOptimiserPage() {
             </CardContent>
           </Card>
         ) : noStreams ? (
-          <Card className="border-border/50">
+          <Card className="border-border/40">
             <CardContent className="p-8 text-center">
               <p className="text-muted-foreground">No waste streams with planned tonnes.</p>
               <p className="text-sm text-muted-foreground mt-1">Add streams and quantities in Inputs, then run the optimiser.</p>
@@ -605,14 +605,14 @@ export default function ProjectOptimiserPage() {
             </CardContent>
           </Card>
         ) : noFacilities ? (
-          <Card className="border-border/50">
+          <Card className="border-border/40">
             <CardContent className="p-8 text-center">
               <p className="text-muted-foreground">No facilities available.</p>
               <p className="text-sm text-muted-foreground mt-1">Configure facilities in Admin to get recommendations.</p>
             </CardContent>
           </Card>
         ) : !hasResults ? (
-          <Card className="border-border/50">
+          <Card className="border-border/40">
             <CardContent className="p-8">
               <div className="flex flex-col gap-6 max-w-md mx-auto">
                 <p className="text-sm text-muted-foreground text-center">Follow these steps to get facility recommendations.</p>
@@ -678,7 +678,7 @@ export default function ProjectOptimiserPage() {
           </Card>
         ) : (
           <>
-            <Card className="border-border/50 overflow-hidden">
+            <Card className="border-border/40 overflow-hidden">
               <div className="overflow-x-auto" style={{ minWidth: 0 }}>
                 <Table className="min-w-[640px]">
                   <TableHeader>

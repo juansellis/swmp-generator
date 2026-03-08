@@ -98,8 +98,8 @@ export function ProjectCard({
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2 }}
       className={cn(
-        "rounded-xl border border-border/50 bg-card shadow-sm overflow-hidden text-left",
-        "transition-all duration-200 hover:scale-[1.01] hover:shadow-md hover:border-border",
+        "rounded-xl border border-border/20 bg-card shadow-[var(--shadow-card)] overflow-hidden text-left",
+        "transition-all duration-200 hover:shadow-[var(--shadow-card-hover)]",
         "flex flex-col",
         className
       )}
@@ -205,17 +205,18 @@ export function ProjectCard({
           </div>
         )}
 
-        <div className="flex items-center justify-between gap-3">
-          <p className="text-xs font-medium text-muted-foreground shrink-0">Status</p>
-          <Select
-            value={localStatus}
-            onValueChange={(v) => handleStatusChange(v as ReportStatusValue)}
-            disabled={statusSaving}
-          >
-            <SelectTrigger
-              className="h-8 w-[140px] text-xs shrink-0"
-              onClick={(e) => e.stopPropagation()}
+        <div className="flex items-center justify-between gap-3 min-w-0">
+          <p className="text-xs font-medium text-muted-foreground shrink-0">Report status</p>
+          <div className="min-w-0 max-w-[55%] flex justify-end">
+            <Select
+              value={localStatus}
+              onValueChange={(v) => handleStatusChange(v as ReportStatusValue)}
+              disabled={statusSaving}
             >
+              <SelectTrigger
+                className="h-8 w-full min-w-0 max-w-[140px] text-xs"
+                onClick={(e) => e.stopPropagation()}
+              >
               {statusSaving ? (
                 <span className="inline-flex items-center gap-1.5">
                   <Loader2 className="size-3 animate-spin" />
@@ -233,10 +234,11 @@ export function ProjectCard({
               ))}
             </SelectContent>
           </Select>
+          </div>
         </div>
       </div>
 
-      <div className="px-5 py-4 border-t border-border/50 flex items-center justify-between gap-3 bg-muted/20">
+      <div className="px-5 py-4 border-t border-border/20 flex items-center justify-between gap-3 bg-muted/20">
         <span className="text-xs text-muted-foreground tabular-nums">
           {new Date(created_at).toLocaleDateString()}
         </span>

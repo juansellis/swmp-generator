@@ -60,7 +60,7 @@ export function PlanSectionHeader({
     <div
       id={id}
       className={cn(
-        "flex items-start gap-3 px-4 py-2.5 border-b border-border/50 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80",
+        "flex items-start gap-3 px-4 py-2.5 border-b border-border/30 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80",
         sticky && "sticky top-0 z-10",
         className
       )}

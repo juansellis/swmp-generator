@@ -71,8 +71,8 @@ export function CollapsibleSectionCard({
     <AccordionItem
       value={id}
       className={cn(
-        "rounded-xl border border-border/50 bg-card overflow-hidden transition-shadow",
-        isPrimary && "border-2 border-l-4 border-l-emerald-500 bg-emerald-500/5 dark:bg-emerald-950/20",
+        "rounded-xl border border-border/25 bg-card overflow-hidden shadow-[var(--shadow-card)] transition-shadow",
+        isPrimary && "border-l-4 border-l-emerald-500 bg-emerald-500/5 dark:bg-emerald-950/20 border-border/30",
         !isPrimary && variant === "grouped" && "border-l-4 " + accentBar
       )}
     >
@@ -90,7 +90,7 @@ export function CollapsibleSectionCard({
       </AccordionTrigger>
       <AccordionContent className="px-4 pb-5 pt-0">
         {hasExtra ? (
-          <div className="border-b border-border/50 bg-muted/30 -mx-4 px-4 py-2 mb-4">
+          <div className="border-b border-border/20 bg-muted/30 -mx-4 px-4 py-2 mb-4">
             <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
               {completion ? (
                 <CompletionProgress
@@ -116,7 +116,7 @@ export function CollapsibleSectionCard({
           {children}
         </div>
         {footer ? (
-          <div className="mt-5 pt-3 border-t border-border/50 flex flex-wrap items-center gap-2">
+          <div className="mt-5 pt-3 border-t border-border/20 flex flex-wrap items-center gap-2">
             {footer}
           </div>
         ) : null}

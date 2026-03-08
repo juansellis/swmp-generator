@@ -16,7 +16,7 @@ export function MaterialRow({ children, className }: MaterialRowProps) {
   return (
     <div
       className={cn(
-        "rounded-lg bg-muted/30 border border-border/40 pl-4 py-3 text-sm",
+        "rounded-lg bg-muted/30 border border-border/20 pl-4 py-3 text-sm",
         "border-l-4 border-l-purple-500/50",
         className
       )}

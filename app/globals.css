@@ -1,10 +1,36 @@
 @import "tailwindcss";
 
+/* Blueprint theme: electric blue accent, neutral base, subtle shadows */
 :root {
   --background: #ffffff;
   --foreground: #171717;
   --popover: #ffffff;
   --popover-foreground: #171717;
+  /* Brand primary – electric blue */
+  --primary: #2563eb;
+  --primary-foreground: #ffffff;
+  --card: #ffffff;
+  --card-foreground: #171717;
+  --muted: #f1f5f9;
+  --muted-foreground: #64748b;
+  --border: #e2e8f0;
+  --input: #e2e8f0;
+  --ring: #2563eb;
+  --accent: #f1f5f9;
+  --accent-foreground: #171717;
+  --destructive: #dc2626;
+  --destructive-foreground: #ffffff;
+  --secondary: #f1f5f9;
+  --secondary-foreground: #334155;
+  /* Subtle card shadow (no heavy borders) */
+  --shadow-card: 0 1px 3px 0 rgb(0 0 0 / 0.05), 0 1px 2px -1px rgb(0 0 0 / 0.05);
+  --shadow-card-hover: 0 4px 6px -1px rgb(0 0 0 / 0.06), 0 2px 4px -2px rgb(0 0 0 / 0.05);
+  --radius-card: 0.75rem;
+  /* Page background tint (dashboard, project pages) */
+  --background-subtle: #f8fafc;
+  /* Header: soft neutral, premium SaaS */
+  --header-bg: #fafbfc;
+  --header-border: rgba(0, 0, 0, 0.06);
 }
 
 @theme inline {
@@ -12,8 +38,28 @@
   --color-foreground: var(--foreground);
   --color-popover: var(--popover);
   --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --radius-card: var(--radius-card);
+  --shadow-card: var(--shadow-card);
+  --shadow-card-hover: var(--shadow-card-hover);
+  --color-background-subtle: var(--background-subtle);
+  --color-header-bg: var(--header-bg);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -22,6 +68,26 @@
     --foreground: #ededed;
     --popover: #18181b;
     --popover-foreground: #fafafa;
+    --primary: #3b82f6;
+    --primary-foreground: #ffffff;
+    --card: #0f0f0f;
+    --card-foreground: #ededed;
+    --muted: #1e1e1e;
+    --muted-foreground: #a1a1aa;
+    --border: #27272a;
+    --input: #27272a;
+    --ring: #3b82f6;
+    --accent: #1e1e1e;
+    --accent-foreground: #fafafa;
+    --destructive: #ef4444;
+    --destructive-foreground: #ffffff;
+    --secondary: #1e1e1e;
+    --secondary-foreground: #e4e4e7;
+    --shadow-card: 0 1px 3px 0 rgb(0 0 0 / 0.2), 0 1px 2px -1px rgb(0 0 0 / 0.2);
+    --shadow-card-hover: 0 4px 6px -1px rgb(0 0 0 / 0.15), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+    --background-subtle: #0f172a;
+    --header-bg: #0f172a;
+    --header-border: rgba(255, 255, 255, 0.08);
   }
 }
 

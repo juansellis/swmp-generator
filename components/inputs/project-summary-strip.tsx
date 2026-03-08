@@ -40,7 +40,7 @@ export function ProjectSummaryStrip({
   return (
     <div
       className={cn(
-        "rounded-xl border border-border/50 bg-muted/40 px-5 py-3",
+        "rounded-xl border border-border/20 bg-muted/30 px-5 py-3 shadow-[var(--shadow-card)]",
         "flex flex-wrap items-center gap-x-4 gap-y-2",
         className
       )}

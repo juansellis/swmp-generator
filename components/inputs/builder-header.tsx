@@ -68,7 +68,7 @@ export function BuilderHeader({
   return (
     <div
       className={cn(
-        "rounded-lg border border-border/60 bg-card px-4 py-3 shadow-sm",
+        "rounded-lg border border-border/25 bg-card px-4 py-3 shadow-[var(--shadow-card)]",
         "flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4",
         className
       )}

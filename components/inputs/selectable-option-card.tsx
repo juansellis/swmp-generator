@@ -41,7 +41,7 @@ export function SelectableOptionCard({
       }}
       className={cn(
         "cursor-pointer transition-all rounded-lg border-2",
-        checked ? accentBorder : "border-border/50 hover:border-border hover:bg-muted/30",
+        checked ? accentBorder : "border-border/30 hover:border-border/50 hover:bg-muted/30",
         disabled && "opacity-60 pointer-events-none",
         className
       )}

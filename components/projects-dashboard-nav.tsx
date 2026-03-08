@@ -36,13 +36,20 @@ export function ProjectsDashboardNav({
   return (
     <div
       className={cn(
-        "flex w-full items-center justify-between gap-4",
+        "flex w-full items-center gap-6 sm:gap-8",
         className
       )}
     >
-      <h1 className="text-lg font-semibold tracking-tight text-foreground truncate">
-        {title}
-      </h1>
+      {/* Nav: current page as active tab with brand accent */}
+      <div className="flex items-center min-w-0">
+        <span
+          className="text-base font-semibold tracking-tight text-primary border-b-2 border-primary pb-0.5 truncate"
+          aria-current="page"
+        >
+          {title}
+        </span>
+      </div>
+      <div className="flex-1 min-w-0" aria-hidden />
       <div className="flex shrink-0 items-center gap-2">
         <Button variant="primary" size="default" onClick={onNewProject}>
           New project

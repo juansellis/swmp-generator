@@ -2333,7 +2333,7 @@ export default function ProjectInputsPage() {
                 </FieldGroup>
               </CollapsibleSectionCard>
 
-                  {/* Waste streams — primary focus */}
+                  {/* Waste streams */}
                   <CollapsibleSectionCard
                     id="waste-streams"
                     icon={<Recycle className="size-5" />}
@@ -2349,8 +2349,8 @@ export default function ProjectInputsPage() {
                     }
                     description="Select streams, set quantities, disposal method, and destination per stream."
                     whyMatters="Core data for diversion calculations and the generated SWMP."
-                    accent="green"
-                    variant="primary"
+                    accent="blue"
+                    variant="grouped"
                     stepStatusBadge={getStepStatusBadge("waste-streams")}
                     checklist={[
                       "At least one waste stream selected",

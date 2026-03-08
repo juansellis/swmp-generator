@@ -46,7 +46,7 @@ export function StreamRow({
   return (
     <div
       className={cn(
-        "rounded-lg border border-border/50 bg-card overflow-hidden transition-shadow hover:shadow-sm",
+        "rounded-lg border border-border/20 bg-card overflow-hidden shadow-[var(--shadow-card)] transition-shadow hover:shadow-[var(--shadow-card-hover)]",
         "flex flex-col",
         className
       )}
@@ -84,7 +84,7 @@ export function StreamRow({
           </Button>
         ) : null}
       </div>
-      {expanded && <div className="border-t border-border/50 bg-background px-4 py-4 space-y-4">{children}</div>}
+      {expanded && <div className="border-t border-border/20 bg-background px-4 py-4 space-y-4">{children}</div>}
     </div>
   );
 }

@@ -38,7 +38,7 @@ export function InputsSection({
     <Card
       id={id}
       className={cn(
-        "rounded-xl border-l-[3px] border-border/50 shadow-sm overflow-hidden",
+        "rounded-xl border-l-[3px] border-border/20 shadow-[var(--shadow-card)] overflow-hidden",
         accentBar,
         className
       )}

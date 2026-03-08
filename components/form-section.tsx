@@ -23,11 +23,11 @@ export function FormSection({
   return (
     <Card
       className={cn(
-        "gap-0 py-0 border-muted-foreground/15 shadow-sm",
+        "gap-0 py-0 border-border/20 shadow-[var(--shadow-card)]",
         className
       )}
     >
-      <CardHeader className="border-b border-muted-foreground/10 py-6">
+      <CardHeader className="border-b border-border/20 py-6">
         <div className="space-y-1">
           <CardTitle className="text-lg font-semibold">{title}</CardTitle>
           {description ? (

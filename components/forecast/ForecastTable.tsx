@@ -233,10 +233,10 @@ function ForecastTableInner({
         )}
       </div>
 
-      <div className="rounded-lg border border-border min-w-0 overflow-hidden">
+      <div className="rounded-lg border border-border/20 min-w-0 overflow-hidden shadow-[var(--shadow-card)]">
         <Table className="table-fixed w-full text-sm">
           <TableHeader>
-            <TableRow className="bg-muted/50 hover:bg-muted/50 border-b border-border">
+            <TableRow className="bg-muted/50 hover:bg-muted/50 border-b border-border/30">
               <TableHead className="w-[40%] font-medium px-3 py-3">Item</TableHead>
               <TableHead className="w-[18%] font-medium px-3 py-3">Qty</TableHead>
               <TableHead className="w-[12%] font-medium px-3 py-3">Unit</TableHead>
@@ -265,7 +265,7 @@ function ForecastTableInner({
               return (
                 <TableRow
                   key={row.id}
-                  className="border-b border-border hover:bg-muted/30"
+                  className="border-b border-border/30 hover:bg-muted/30"
                 >
                   <TableCell className="px-3 py-4 align-middle min-w-0 w-[40%]">
                     <Input

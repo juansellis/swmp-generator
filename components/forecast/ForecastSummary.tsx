@@ -45,11 +45,11 @@ function ForecastSummaryInner({ items, className }: ForecastSummaryProps) {
   return (
     <aside
       className={cn(
-        "rounded-2xl border border-border bg-card shadow-sm overflow-hidden",
+        "rounded-2xl border border-border/20 bg-card shadow-[var(--shadow-card)] overflow-hidden",
         className
       )}
     >
-      <div className="border-b border-border px-4 py-3">
+      <div className="border-b border-border/20 px-4 py-3">
         <h3 className="text-sm font-semibold tracking-tight">Summary</h3>
       </div>
       <div className="px-4 py-4 space-y-6">

@@ -82,10 +82,10 @@ export function InputsSectionCard({
         status={stepStatusToPlanStatus(stepStatusBadge)}
         actions={actions}
         sticky={true}
-        className={variant === "grouped" ? "bg-muted/40 rounded-t-xl" : "bg-card"}
+        className={variant === "grouped" ? "bg-muted/30 rounded-t-xl" : "bg-card"}
       />
       {hasExtra ? (
-        <div className="border-b border-border/50 bg-muted/30 px-4 py-2">
+        <div className="border-b border-border/20 bg-muted/20 px-4 py-2">
           <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
             {completion ? (
               <CompletionProgress
@@ -114,7 +114,7 @@ export function InputsSectionCard({
       {guidance ? <div className="mb-3">{guidance}</div> : null}
       {children}
       {footer ? (
-        <div className="mt-5 pt-3 border-t border-border/50 flex flex-wrap items-center gap-2">
+        <div className="mt-5 pt-3 border-t border-border/20 flex flex-wrap items-center gap-2">
           {footer}
         </div>
       ) : null}
@@ -126,9 +126,9 @@ export function InputsSectionCard({
       <section
         id={id}
         className={cn(
-          "rounded-xl border border-border/50 overflow-hidden border-l-4",
+          "rounded-xl border border-border/20 overflow-hidden border-l-4 shadow-[var(--shadow-card)]",
           accentBarClass,
-          "bg-card transition-shadow hover:shadow-sm",
+          "bg-card transition-shadow hover:shadow-md",
           className
         )}
       >
@@ -142,7 +142,7 @@ export function InputsSectionCard({
     <section
       id={id}
       className={cn(
-        "rounded-xl border border-border/50 bg-card overflow-hidden transition-shadow hover:shadow-sm",
+        "rounded-xl border border-border/20 bg-card overflow-hidden shadow-[var(--shadow-card)] transition-shadow hover:shadow-[var(--shadow-card-hover)]",
         className
       )}
     >

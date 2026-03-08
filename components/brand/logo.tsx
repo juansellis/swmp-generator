@@ -3,37 +3,46 @@ import Link from "next/link"
 import * as React from "react"
 import { cn } from "@/lib/utils"
 
+/** Blueprint logo aspect ratio (width / height) — horizontal pill shape */
+const LOGO_ASPECT = 4.5
+
 type LogoProps = {
   className?: string
+  /** Height in pixels; used with width to preserve aspect ratio */
   height?: number
+  /** Width in pixels; if omitted, derived from height */
   width?: number
   href?: string
 }
 
 export function Logo({ className, height, width, href }: LogoProps) {
-  const logoHeight = height ?? 32
-  // Default to a reasonable width if not provided (assuming roughly 3:1 aspect ratio for logo)
-  const logoWidth = width ?? (logoHeight * 3)
+  const logoHeight = height ?? 36
+  const logoWidth = width ?? Math.round(logoHeight * LOGO_ASPECT)
 
   const logoContent = (
     <Image
-      src="/wastex-logo.svg"
+      src="/brand/blueprint-logo.png"
       alt="Blueprint"
-      height={logoHeight}
       width={logoWidth}
-      className={cn("h-auto w-auto", className)}
+      height={logoHeight}
       priority
       unoptimized
+      className={cn("object-contain max-w-full", className)}
+      style={{ background: "transparent" }}
     />
   )
 
   if (href) {
     return (
-      <Link href={href} className="inline-flex items-center">
+      <Link href={href} className="inline-flex items-center shrink-0 min-w-0 [&_img]:bg-transparent">
         {logoContent}
       </Link>
     )
   }
 
-  return <div className="inline-flex items-center">{logoContent}</div>
+  return (
+    <div className="inline-flex items-center shrink-0 min-w-0 [&_img]:bg-transparent">
+      {logoContent}
+    </div>
+  )
 }

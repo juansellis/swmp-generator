@@ -56,7 +56,7 @@ export function PhaseTabs({ projectId, forecastCount, className }: PhaseTabsProp
   return (
     <nav
       className={cn(
-        "inline-flex h-9 items-center justify-center gap-0 rounded-lg bg-muted p-[3px] text-muted-foreground",
+        "inline-flex h-9 items-center justify-center gap-0 rounded-lg bg-muted/70 p-[3px] text-muted-foreground",
         className
       )}
       aria-label="Project phases"
@@ -70,11 +70,11 @@ export function PhaseTabs({ projectId, forecastCount, className }: PhaseTabsProp
             onClick={() => router.push(tab.href)}
             aria-current={active ? "page" : undefined}
             className={cn(
-              "inline-flex items-center justify-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium whitespace-nowrap transition-all",
+              "inline-flex items-center justify-center gap-1.5 rounded-md border border-transparent px-3 py-1.5 text-sm font-medium whitespace-nowrap transition-all",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
               active
-                ? "border-transparent bg-background text-foreground shadow-sm"
-                : "border-transparent bg-transparent text-muted-foreground hover:text-foreground"
+                ? "bg-background text-primary shadow-[var(--shadow-card)]"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
             )}
           >
             {tab.label}

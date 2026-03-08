@@ -103,7 +103,11 @@ export default function LoginPage() {
       <div className="min-h-[80vh] flex flex-col items-center justify-center bg-muted/20 py-12">
         <div className="w-full max-w-md mx-auto px-4 space-y-6">
           <div className="flex justify-center">
-            <Logo height={96} className="h-24 w-auto sm:h-28 md:h-32" />
+            <Logo
+              width={200}
+              height={44}
+              className="w-[140px] h-auto sm:w-[180px] md:w-[220px]"
+            />
           </div>
 
           <PageHeader

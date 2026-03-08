@@ -25,19 +25,26 @@ export function AppShell({
     <div
       className={cn(
         "min-h-screen text-foreground",
-        noPageTint ? "bg-background" : "bg-slate-50",
+        noPageTint ? "bg-background" : "bg-[var(--background-subtle)]",
         className
       )}
     >
       {!hideHeader ? (
-        <div className="sticky top-0 z-10 border-b border-border/50 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
-          <div className={cn("mx-auto w-full max-w-[1200px] px-6 py-3", containerClassName)}>
-            <div className="flex items-center gap-4">
-              <Logo height={36} href="/projects" className="h-9 w-auto" />
-              {topNav ? <div className="flex-1">{topNav}</div> : null}
+        <header
+          className="sticky top-0 z-10 bg-[var(--header-bg)] border-b border-[var(--header-border)] shadow-[0_1px_0_0_var(--header-border)] backdrop-blur-sm"
+          role="banner"
+        >
+          <div className={cn("mx-auto w-full max-w-[1200px] px-4 sm:px-6 py-3", containerClassName)}>
+            <div className="flex items-center gap-6 sm:gap-8 min-w-0">
+              <Logo
+                height={36}
+                href="/projects"
+                className="h-8 w-auto max-w-[140px] sm:max-w-[180px] shrink-0"
+              />
+              {topNav ? <div className="flex-1 min-w-0">{topNav}</div> : null}
             </div>
           </div>
-        </div>
+        </header>
       ) : null}
 
       <main className={cn("flex-1", className)}>

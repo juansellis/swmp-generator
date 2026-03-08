@@ -53,7 +53,7 @@ export function RoleCard({
       type="single"
       collapsible
       defaultValue={defaultOpen ? value : ""}
-      className="rounded-lg border border-border/50 overflow-hidden bg-card"
+      className="rounded-lg border border-border/20 overflow-hidden bg-card shadow-[var(--shadow-card)]"
     >
       <AccordionItem value={value} className="border-0">
         <AccordionTrigger className="px-4 py-3 hover:no-underline hover:bg-muted/40 [&>svg]:shrink-0">

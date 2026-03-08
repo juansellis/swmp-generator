@@ -38,7 +38,7 @@ export function SectionHeader({
     <div
       id={id}
       className={cn(
-        "flex items-start gap-4 rounded-t-xl border border-border/50 border-b-0 bg-muted/40 px-5 py-4",
+        "flex items-start gap-4 rounded-t-xl border border-border/25 border-b-0 bg-muted/40 px-5 py-4",
         "min-h-[4rem]",
         className
       )}

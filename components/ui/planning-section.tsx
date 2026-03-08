@@ -30,7 +30,7 @@ export function PlanningSection({
   return (
     <section
       className={cn(
-        "rounded-xl border border-border bg-card shadow-sm p-6 pl-7 border-l-4",
+        "rounded-xl border border-border/20 bg-card shadow-[var(--shadow-card)] p-6 pl-7 border-l-4",
         BORDER_CLASS[variant],
         className
       )}
