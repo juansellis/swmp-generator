@@ -16,6 +16,14 @@ import type { ProjectStatusData } from "@/lib/projectStatus";
 import { ProjectCard, type ReportStatusValue } from "@/components/project-card";
 import { DeleteProjectDialog } from "@/components/projects/DeleteProjectDialog";
 import { NewProjectSheet } from "@/components/new-project-sheet";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import type { QuickCreateProjectFormState } from "@/components/quick-create-project-modal";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -30,6 +38,7 @@ import type { DashboardMetricsResponse } from "@/app/api/dashboard/metrics/route
 import type { PlanningChecklist } from "@/lib/planning/planningChecklist";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { envPublic } from "@/lib/env/public";
 
 type ProjectRow = {
   id: string;
@@ -143,6 +152,25 @@ export default function ProjectsPage() {
   const [sheetMessage, setSheetMessage] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [deleteDialogProject, setDeleteDialogProject] = useState<{ id: string; name: string } | null>(null);
+  const [purchaseCreditsOpen, setPurchaseCreditsOpen] = useState(false);
+  const [checkoutLoading, setCheckoutLoading] = useState<"single" | "bundle" | null>(null);
+  const [creditsDisplay, setCreditsDisplay] = useState<{
+    siteCreditsBalance: number;
+    freeSiteUsed: boolean;
+  } | null>(null);
+
+  const canCreateProject =
+    creditsDisplay == null ||
+    !creditsDisplay.freeSiteUsed ||
+    creditsDisplay.siteCreditsBalance > 0;
+
+  function openNewProjectFlow() {
+    if (creditsDisplay != null && !canCreateProject) {
+      setPurchaseCreditsOpen(true);
+      return;
+    }
+    setNewProjectSheetOpen(true);
+  }
 
   async function handleReportStatusChange(projectId: string, report_status: ReportStatusValue) {
     const res = await fetch(`/api/projects/${projectId}`, {
@@ -249,6 +277,25 @@ export default function ProjectsPage() {
     }
     router.replace("/login");
   }
+
+  async function fetchCredits() {
+    if (!user?.id) return;
+    try {
+      const res = await fetch("/api/billing/credits", { credentials: "include" });
+      if (!res.ok) return;
+      const data = await res.json();
+      setCreditsDisplay({
+        siteCreditsBalance: data.site_credits_balance ?? 0,
+        freeSiteUsed: data.free_site_used ?? false,
+      });
+    } catch {
+      // ignore
+    }
+  }
+
+  useEffect(() => {
+    if (user?.id) fetchCredits();
+  }, [user?.id]);
 
   async function fetchProjects() {
     setListLoading(true);
@@ -363,51 +410,71 @@ export default function ProjectsPage() {
       setSheetError(`Please complete the highlighted fields: ${missing.join(", ")}`);
       return;
     }
-    const validateRes = await fetch("/api/validate-address", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({ place_id: state.place_id }),
-    });
-    if (!validateRes.ok) {
-      const err = await validateRes.json();
-      setSheetError(err?.error ?? "Address validation failed.");
-      return;
-    }
-    const serverAddress = (await validateRes.json()) as { formatted_address: string; place_id: string; lat: number; lng: number };
-    const ptSave = state.projectType === "Other" ? (state.projectTypeOther.trim() || "Other") : state.projectType;
+    const ptSave = state.projectType === "Other" ? (state.projectTypeOther?.trim() || "Other") : state.projectType;
     setCreateLoading(true);
     try {
-      const { data, error } = await supabase
-        .from("projects")
-        .insert({
-          user_id: user.id,
+      const res = await fetch("/api/projects/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
           name: state.name.trim(),
-          address: serverAddress.formatted_address,
-          site_address: serverAddress.formatted_address,
-          site_place_id: serverAddress.place_id,
-          site_lat: serverAddress.lat,
-          site_lng: serverAddress.lng,
+          place_id: state.place_id,
           region: state.region,
-          project_type: ptSave,
-          start_date: state.startDate,
-          end_date: null,
-          client_name: state.clientName.trim(),
-          main_contractor: state.mainContractor.trim(),
-          swmp_owner: state.swmpOwner.trim(),
-        })
-        .select("id")
-        .single();
-      if (error) {
-        setSheetError(error.message);
+          projectType: state.projectType,
+          projectTypeOther: state.projectTypeOther,
+          startDate: state.startDate,
+          clientName: state.clientName.trim(),
+          mainContractor: state.mainContractor.trim(),
+          swmpOwner: state.swmpOwner.trim(),
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 402 && (data as { code?: string }).code === "no_credits") {
+        setNewProjectSheetOpen(false);
+        setPurchaseCreditsOpen(true);
+        return;
+      }
+      if (!res.ok) {
+        setSheetError((data as { error?: string }).error ?? "Failed to create project.");
         return;
       }
       setSheetMessage("Project created.");
       await fetchProjects();
       setNewProjectSheetOpen(false);
-      if (data?.id) router.push(`/projects/${data.id}/inputs`);
+      if ((data as { id?: string }).id) router.push(`/projects/${(data as { id: string }).id}/inputs`);
     } finally {
       setCreateLoading(false);
+    }
+  }
+
+  async function startCheckout(packageType: "single" | "bundle") {
+    try {
+      void envPublic.stripe.publishableKey();
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Billing is not configured.";
+      toast.error(message);
+      return;
+    }
+
+    setCheckoutLoading(packageType);
+    try {
+      const res = await fetch("/api/billing/create-checkout-session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ package: packageType, accountId: user?.id }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        toast.error(json?.error ?? "Checkout failed");
+        return;
+      }
+      const url = (json as { url?: string }).url;
+      if (url) window.location.href = url;
+      else toast.error("Checkout URL missing");
+    } finally {
+      setCheckoutLoading(null);
     }
   }
 
@@ -465,7 +532,8 @@ export default function ProjectsPage() {
           title="Projects"
           userEmail={user?.email ?? null}
           isSuperAdmin={isSuperAdmin}
-          onNewProject={() => setNewProjectSheetOpen(true)}
+          creditsDisplay={creditsDisplay}
+          onNewProject={openNewProjectFlow}
           onSignOut={handleSignOut}
         />
       }
@@ -501,7 +569,7 @@ export default function ProjectsPage() {
                   variant="primary"
                   size="default"
                   className="w-full sm:w-auto"
-                  onClick={() => setNewProjectSheetOpen(true)}
+                  onClick={openNewProjectFlow}
                 >
                   <Plus className="size-4 mr-2" />
                   New project
@@ -615,7 +683,7 @@ export default function ProjectsPage() {
                         variant="primary"
                         size="sm"
                         className="mt-4"
-                        onClick={() => setNewProjectSheetOpen(true)}
+                        onClick={openNewProjectFlow}
                       >
                         New project
                       </Button>
@@ -680,6 +748,39 @@ export default function ProjectsPage() {
             }}
           />
         )}
+
+        <Dialog
+          open={purchaseCreditsOpen}
+          onOpenChange={(open) => {
+            setPurchaseCreditsOpen(open);
+            if (!open) fetchCredits();
+          }}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>You need site credits to create another plan</DialogTitle>
+              <DialogDescription>
+                Your first site is free. After that, each new site uses 1 credit.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="flex-col sm:flex-row gap-2">
+              <Button
+                variant="primary"
+                onClick={() => startCheckout("single")}
+                disabled={!!checkoutLoading}
+              >
+                {checkoutLoading === "single" ? "Redirecting…" : "Buy 1 site credit"}
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => startCheckout("bundle")}
+                disabled={!!checkoutLoading}
+              >
+                {checkoutLoading === "bundle" ? "Redirecting…" : "Buy 5 site credits and save 20%"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </AppShell>
   );

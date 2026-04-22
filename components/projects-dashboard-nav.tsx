@@ -10,14 +10,21 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Settings, User, LogOut, LayoutDashboard, UserCircle } from "lucide-react";
+import { Settings, User, LogOut, LayoutDashboard, UserCircle, CreditCard } from "lucide-react";
 import { cn } from "@/lib/utils";
+
+export interface CreditsDisplay {
+  siteCreditsBalance: number;
+  freeSiteUsed: boolean;
+}
 
 export interface ProjectsDashboardNavProps {
   /** Page title in the nav bar (e.g. "Projects") */
   title: string;
   userEmail: string | null;
   isSuperAdmin: boolean;
+  /** If provided, shows "Credits: X" or "Free site available" and link to billing */
+  creditsDisplay?: CreditsDisplay | null;
   onNewProject: () => void;
   onSignOut: () => void;
   className?: string;
@@ -27,11 +34,18 @@ export function ProjectsDashboardNav({
   title,
   userEmail,
   isSuperAdmin,
+  creditsDisplay,
   onNewProject,
   onSignOut,
   className,
 }: ProjectsDashboardNavProps) {
   const router = useRouter();
+  const creditsLabel =
+    creditsDisplay == null
+      ? null
+      : !creditsDisplay.freeSiteUsed
+        ? "Free site available"
+        : `Credits: ${creditsDisplay.siteCreditsBalance}`;
 
   return (
     <div
@@ -51,6 +65,14 @@ export function ProjectsDashboardNav({
       </div>
       <div className="flex-1 min-w-0" aria-hidden />
       <div className="flex shrink-0 items-center gap-2">
+        {creditsLabel != null ? (
+          <Button variant="outline" size="default" asChild className="gap-1.5">
+            <Link href="/billing">
+              <CreditCard className="size-4" />
+              <span className="hidden sm:inline">{creditsLabel}</span>
+            </Link>
+          </Button>
+        ) : null}
         <Button variant="primary" size="default" onClick={onNewProject}>
           New project
         </Button>
@@ -84,6 +106,14 @@ export function ProjectsDashboardNav({
               <div className="px-2 py-2 text-sm text-muted-foreground truncate">
                 {userEmail}
               </div>
+            ) : null}
+            {creditsLabel != null ? (
+              <DropdownMenuItem asChild>
+                <Link href="/billing" className="gap-2">
+                  <CreditCard className="size-4" />
+                  <span className="truncate">{creditsLabel}</span>
+                </Link>
+              </DropdownMenuItem>
             ) : null}
             <DropdownMenuItem asChild>
               <Link href="/profile" className="gap-2">
