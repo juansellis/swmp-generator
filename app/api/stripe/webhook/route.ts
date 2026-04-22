@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { headers } from "next/headers";
 import Stripe from "stripe";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { envServer } from "@/lib/env/server";
 
 /**
  * POST /api/stripe/webhook
@@ -13,14 +12,10 @@ import { envServer } from "@/lib/env/server";
  * Credits are NEVER granted from the frontend redirect; only here.
  */
 export async function POST(req: Request) {
-  let stripeSecretKey: string;
-  let webhookSecret: string;
-  try {
-    stripeSecretKey = envServer.stripe.secretKey();
-    webhookSecret = envServer.stripe.webhookSecret();
-  } catch (e) {
-    const message = e instanceof Error ? e.message : "Stripe not configured";
-    return NextResponse.json({ error: message }, { status: 503 });
+  const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+  if (!stripeSecretKey || !webhookSecret) {
+    return NextResponse.json({ error: "Stripe not configured" }, { status: 503 });
   }
 
   const headerList = await headers();

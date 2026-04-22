@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { envServer } from "@/lib/env/server";
 
 /**
  * POST /api/billing/create-checkout-session
@@ -18,19 +17,12 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // Validate required server env (throws with clear message if missing)
-  let stripeSecretKey: string;
-  let priceSingleSite: string;
-  let priceSiteBundle: string;
-  let publicUrl: string;
-  try {
-    stripeSecretKey = envServer.stripe.secretKey();
-    priceSingleSite = envServer.stripe.priceSingleSite();
-    priceSiteBundle = envServer.stripe.priceSiteBundle();
-    publicUrl = envServer.app.publicUrl();
-  } catch (e) {
-    const message = e instanceof Error ? e.message : "Billing is not configured.";
-    return NextResponse.json({ error: message }, { status: 503 });
+  const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+  const priceSingleSite = process.env.STRIPE_PRICE_SINGLE_SITE;
+  const priceSiteBundle = process.env.STRIPE_PRICE_SITE_BUNDLE;
+  const publicUrl = process.env.NEXT_PUBLIC_APP_URL;
+  if (!stripeSecretKey || !priceSingleSite || !priceSiteBundle || !publicUrl) {
+    return NextResponse.json({ error: "Billing is not configured." }, { status: 503 });
   }
 
   let body: { package?: string; accountId?: string } = {};

@@ -38,7 +38,7 @@ import type { DashboardMetricsResponse } from "@/app/api/dashboard/metrics/route
 import type { PlanningChecklist } from "@/lib/planning/planningChecklist";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { envPublic } from "@/lib/env/public";
+import { stripePromise } from "@/lib/stripe/stripePromise";
 
 type ProjectRow = {
   id: string;
@@ -449,11 +449,8 @@ export default function ProjectsPage() {
   }
 
   async function startCheckout(packageType: "single" | "bundle") {
-    try {
-      void envPublic.stripe.publishableKey();
-    } catch (e) {
-      const message = e instanceof Error ? e.message : "Billing is not configured.";
-      toast.error(message);
+    if (!process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY) {
+      toast.error("Stripe checkout is not configured");
       return;
     }
 
@@ -470,9 +467,20 @@ export default function ProjectsPage() {
         toast.error(json?.error ?? "Checkout failed");
         return;
       }
-      const url = (json as { url?: string }).url;
-      if (url) window.location.href = url;
-      else toast.error("Checkout URL missing");
+      const sessionId = (json as { sessionId?: string }).sessionId;
+      if (!sessionId) {
+        toast.error("Checkout session missing");
+        return;
+      }
+
+      const stripe = await stripePromise;
+      if (!stripe) {
+        toast.error("Stripe checkout is not configured");
+        return;
+      }
+
+      const { error } = await stripe.redirectToCheckout({ sessionId });
+      if (error) toast.error(error.message);
     } finally {
       setCheckoutLoading(null);
     }

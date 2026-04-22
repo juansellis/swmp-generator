@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CreditCard, Sparkles, Package } from "lucide-react";
 import { toast } from "sonner";
-import { envPublic } from "@/lib/env/public";
+import { stripePromise } from "@/lib/stripe/stripePromise";
 
 type CreditsResponse = { site_credits_balance: number; free_site_used: boolean };
 type TransactionRow = {
@@ -88,13 +88,8 @@ function BillingContent() {
   }, [router]);
 
   async function startCheckout(packageType: "single" | "bundle") {
-    // Ensure billing is configured client-side (publishable key present)
-    // (We still create the session server-side; this is only to catch obvious misconfig.)
-    try {
-      void envPublic.stripe.publishableKey();
-    } catch (e) {
-      const message = e instanceof Error ? e.message : "Billing is not configured.";
-      toast.error(message);
+    if (!process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY) {
+      toast.error("Stripe checkout is not configured");
       return;
     }
 
@@ -111,9 +106,20 @@ function BillingContent() {
         toast.error(json?.error ?? "Checkout failed");
         return;
       }
-      const url = (json as { url?: string }).url;
-      if (url) window.location.href = url;
-      else toast.error("Checkout URL missing");
+      const sessionId = (json as { sessionId?: string }).sessionId;
+      if (!sessionId) {
+        toast.error("Checkout session missing");
+        return;
+      }
+
+      const stripe = await stripePromise;
+      if (!stripe) {
+        toast.error("Stripe checkout is not configured");
+        return;
+      }
+
+      const { error } = await stripe.redirectToCheckout({ sessionId });
+      if (error) toast.error(error.message);
     } finally {
       setCheckoutLoading(null);
     }
