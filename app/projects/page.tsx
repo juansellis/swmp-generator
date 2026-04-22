@@ -464,7 +464,8 @@ export default function ProjectsPage() {
       });
       const json = await res.json();
       if (!res.ok) {
-        toast.error(json?.error ?? "Checkout failed");
+        if (res.status === 503) toast.error("Billing is not configured.");
+        else toast.error(json?.error ?? "Checkout failed");
         return;
       }
       const sessionId = (json as { sessionId?: string }).sessionId;

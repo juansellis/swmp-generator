@@ -21,8 +21,25 @@ export async function POST(req: Request) {
   const priceSingleSite = process.env.STRIPE_PRICE_SINGLE_SITE;
   const priceSiteBundle = process.env.STRIPE_PRICE_SITE_BUNDLE;
   const publicUrl = process.env.NEXT_PUBLIC_APP_URL;
-  if (!stripeSecretKey || !priceSingleSite || !priceSiteBundle || !publicUrl) {
-    return NextResponse.json({ error: "Billing is not configured." }, { status: 503 });
+  if (!stripeSecretKey) {
+    // eslint-disable-next-line no-console
+    console.error("[billing] Missing STRIPE_SECRET_KEY");
+    return NextResponse.json({ error: "Missing STRIPE_SECRET_KEY" }, { status: 503 });
+  }
+  if (!priceSingleSite) {
+    // eslint-disable-next-line no-console
+    console.error("[billing] Missing STRIPE_PRICE_SINGLE_SITE");
+    return NextResponse.json({ error: "Missing STRIPE_PRICE_SINGLE_SITE" }, { status: 503 });
+  }
+  if (!priceSiteBundle) {
+    // eslint-disable-next-line no-console
+    console.error("[billing] Missing STRIPE_PRICE_SITE_BUNDLE");
+    return NextResponse.json({ error: "Missing STRIPE_PRICE_SITE_BUNDLE" }, { status: 503 });
+  }
+  if (!publicUrl) {
+    // eslint-disable-next-line no-console
+    console.error("[billing] Missing NEXT_PUBLIC_APP_URL");
+    return NextResponse.json({ error: "Missing NEXT_PUBLIC_APP_URL" }, { status: 503 });
   }
 
   let body: { package?: string; accountId?: string } = {};
